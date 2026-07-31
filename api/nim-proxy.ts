@@ -11,12 +11,17 @@ const NVIDIA_ENDPOINT = 'https://integrate.api.nvidia.com/v1/chat/completions';
 
 // Default model cycle when no specific model is requested.
 // The order matters: try the best first, then fall back to faster/cheaper options.
+// NOTE: When adding new models to the frontend registry, add strong candidates here too.
 const DEFAULT_MODEL_CYCLE = [
   'deepseek-ai/deepseek-v4-pro',
   'deepseek-ai/deepseek-v4-flash',
   'z-ai/glm-5.2',
   'moonshotai/kimi-k2.6',
   'minimaxai/minimax-m3',
+  'meta/llama-3.3-70b-instruct',
+  'meta/llama-3.1-8b-instruct',
+  'mistralai/mistral-large-2-instruct',
+  'mistralai/mistral-7b-instruct-v0.3',
 ];
 
 function fetchWithTimeout(
