@@ -1,0 +1,86 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  /* Base palette */
+  --bg-primary: #0a0e14;
+  --bg-secondary: #131820;
+  --bg-card: #1a2030;
+
+  /* Accents */
+  --accent-primary: #00f5d4;
+  --accent-secondary: #ff4757;
+  --accent-glow: rgba(0, 245, 212, 0.4);
+
+  /* Text */
+  --text-primary: #e8eef5;
+  --text-muted: #8896a6;
+
+  /* Touch targets */
+  --touch-min: 72px;
+  --radius-lg: 16px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+body {
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: Inter, system-ui, 'Segoe UI', Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  user-select: none;
+}
+
+@layer components {
+  .ario-panel {
+    @apply bg-ario-grey rounded-3xl border border-white/5 relative overflow-hidden;
+  }
+
+  .ario-button {
+    @apply min-w-touch min-h-touch flex items-center justify-center rounded-2xl
+           bg-ario-card text-ario-text border border-white/10
+           transition-all duration-200 active:scale-95
+           hover:border-ario-turquoise/50 hover:shadow-[0_0_20px_rgba(0,245,212,0.15)]
+           focus:outline-none focus:ring-2 focus:ring-ario-turquoise/50;
+  }
+
+  .ario-glow {
+    box-shadow: 0 0 40px rgba(0, 245, 212, 0.3);
+  }
+
+  .ario-divider {
+    background: linear-gradient(90deg, transparent, rgba(255, 71, 87, 0.6), rgba(255, 77, 109, 0.8), rgba(255, 71, 87, 0.6), transparent);
+    height: 2px;
+  }
+}
+
+/* Custom scrollbar for idea canvas */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(0, 245, 212, 0.2);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 245, 212, 0.4);
+}
