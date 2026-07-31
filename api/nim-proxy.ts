@@ -8,9 +8,15 @@ interface ProxyBody {
 }
 
 const NVIDIA_ENDPOINT = 'https://integrate.api.nvidia.com/v1/chat/completions';
-const DEFAULT_MODELS = [
-  'meta/llama-3.1-8b-instruct',   // Fast, good enough for YAML
-  'meta/llama-3.3-70b-instruct',  // Higher quality fallback
+
+// Default model cycle when no specific model is requested.
+// The order matters: try the best first, then fall back to faster/cheaper options.
+const DEFAULT_MODEL_CYCLE = [
+  'deepseek-ai/deepseek-v4-pro',
+  'deepseek-ai/deepseek-v4-flash',
+  'z-ai/glm-5.2',
+  'moonshotai/kimi-k2.6',
+  'minimaxai/minimax-m3',
 ];
 
 function fetchWithTimeout(
@@ -27,7 +33,6 @@ function fetchWithTimeout(
 
 async function callNIM(
   apiKey: string,
-  transcript: string,
   systemPrompt: string,
   userPrompt: string,
   model: string
@@ -73,13 +78,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const finalSystemPrompt = systemPrompt || 'You are Ario. Convert ideas into concise YAML.';
   const finalUserPrompt = userPrompt || transcript;
 
-  // If a specific model is requested, try only that
-  const modelsToTry = model ? [model] : DEFAULT_MODELS;
+  // If client requested a specific model, try it first. Otherwise cycle the registry.
+  const modelsToTry = model
+    ? [model, ...DEFAULT_MODEL_CYCLE.filter((m) => m !== model)]
+    : DEFAULT_MODEL_CYCLE;
+
   let lastError = 'Unknown error';
 
   for (const modelName of modelsToTry) {
     try {
-      const response = await callNIM(apiKey, transcript, finalSystemPrompt, finalUserPrompt, modelName);
+      const response = await callNIM(apiKey, finalSystemPrompt, finalUserPrompt, modelName);
 
       if (!response.ok) {
         const errorText = await response.text();

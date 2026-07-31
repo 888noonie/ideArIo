@@ -8,7 +8,12 @@ import { generateIdearioFromTranscript } from './lib/nim-proxy';
 import { parseIdearioYaml, serializeIdearioYaml } from './lib/yaml-builder';
 import { saveIdearioToGist } from './lib/gist-client';
 import { saveToLocalDB, loadFromLocalDB, markAsSynced } from './lib/storage';
+import {
+  loadSelectedModelId,
+  saveSelectedModelId,
+} from './lib/model-registry';
 import type { ArioState, IdearioYAML, SavedIdeario } from './types/ideario';
+import type { ModelInfo } from './lib/model-registry';
 
 function generateId(): string {
   return `idea-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -20,6 +25,7 @@ export default function App() {
   const [savedIdeas, setSavedIdeas] = useState<SavedIdeario[]>([]);
   const [online, setOnline] = useState(true);
   const [syncStatus, setSyncStatus] = useState<'synced' | 'pending'>('synced');
+  const [selectedModelId, setSelectedModelId] = useState<string>(loadSelectedModelId);
 
   const {
     transcript,
@@ -78,7 +84,7 @@ export default function App() {
     cue('processing');
 
     try {
-      const rawYaml = await generateIdearioFromTranscript(finalTranscript);
+      const rawYaml = await generateIdearioFromTranscript(finalTranscript, selectedModelId);
       const parsed = parseIdearioYaml(rawYaml);
 
       if (!parsed) {
@@ -98,7 +104,7 @@ export default function App() {
       processingRef.current = false;
       resetTranscript();
     }
-  }, [cue, resetTranscript, speak]);
+  }, [cue, resetTranscript, selectedModelId, speak]);
 
   const handleActivate = useCallback(() => {
     if (arioState === 'thinking') return;
@@ -178,6 +184,12 @@ export default function App() {
     setArioState('idle');
   }, [resetTranscript]);
 
+  const handleModelChange = useCallback((model: ModelInfo) => {
+    setSelectedModelId(model.id);
+    saveSelectedModelId(model.id);
+    speak(`Switched to ${model.name}`, 'normal');
+  }, [speak]);
+
   // Handle speech errors
   useEffect(() => {
     if (speechError) {
@@ -216,6 +228,8 @@ export default function App() {
           online={online}
           synced={allSynced && syncStatus === 'synced'}
           ideaCount={savedIdeas.length}
+          selectedModelId={selectedModelId}
+          onModelChange={handleModelChange}
         />
       </div>
     </div>

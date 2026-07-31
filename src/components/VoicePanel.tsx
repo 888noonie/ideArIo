@@ -23,7 +23,7 @@ export function VoicePanel({
   const displayText = interimTranscript || transcript;
 
   return (
-    <div className="ario-panel h-full flex flex-col p-6">
+    <div className="ario-panel h-full flex flex-col p-6 overflow-y-auto">
       {/* Top brand */}
       <div className="mb-6">
         <h1 className="text-3xl font-bold tracking-tight text-ario-turquoise">IDEARIO</h1>

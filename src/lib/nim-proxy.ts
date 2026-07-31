@@ -8,7 +8,10 @@ export interface NIMResponse {
   }>;
 }
 
-export async function generateIdearioFromTranscript(transcript: string): Promise<string> {
+export async function generateIdearioFromTranscript(
+  transcript: string,
+  modelId?: string
+): Promise<string> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 15000); // 15s client timeout
 
@@ -22,6 +25,7 @@ export async function generateIdearioFromTranscript(transcript: string): Promise
         transcript,
         systemPrompt: SYSTEM_PROMPT,
         userPrompt: buildUserPrompt(transcript),
+        model: modelId,
       }),
       signal: controller.signal,
     });
