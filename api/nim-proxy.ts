@@ -7,8 +7,54 @@ interface ProxyBody {
   model?: string;
 }
 
+const NVIDIA_ENDPOINT = 'https://integrate.api.nvidia.com/v1/chat/completions';
+const DEFAULT_MODELS = [
+  'meta/llama-3.1-8b-instruct',   // Fast, good enough for YAML
+  'meta/llama-3.3-70b-instruct',  // Higher quality fallback
+];
+
+function fetchWithTimeout(
+  url: string,
+  options: RequestInit,
+  timeoutMs: number
+): Promise<Response> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+  return fetch(url, { ...options, signal: controller.signal })
+    .finally(() => clearTimeout(timeout));
+}
+
+async function callNIM(
+  apiKey: string,
+  transcript: string,
+  systemPrompt: string,
+  userPrompt: string,
+  model: string
+): Promise<Response> {
+  return fetchWithTimeout(
+    NVIDIA_ENDPOINT,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt },
+        ],
+        temperature: 0.3,
+        max_tokens: 400,
+      }),
+    },
+    8000 // 8 second timeout per attempt
+  );
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  // Only allow POST
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
@@ -24,39 +70,30 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(400).json({ error: 'transcript is required' });
   }
 
-  try {
-    const response = await fetch('https://integrate.api.nvidia.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: model || 'meta/llama-3.3-70b-instruct',
-        messages: [
-          {
-            role: 'system',
-            content: systemPrompt || 'You are Ario. Convert ideas into concise YAML.',
-          },
-          {
-            role: 'user',
-            content: userPrompt || transcript,
-          },
-        ],
-        temperature: 0.3,
-        max_tokens: 800,
-      }),
-    });
+  const finalSystemPrompt = systemPrompt || 'You are Ario. Convert ideas into concise YAML.';
+  const finalUserPrompt = userPrompt || transcript;
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      return res.status(response.status).json({ error: errorText });
+  // If a specific model is requested, try only that
+  const modelsToTry = model ? [model] : DEFAULT_MODELS;
+  let lastError = 'Unknown error';
+
+  for (const modelName of modelsToTry) {
+    try {
+      const response = await callNIM(apiKey, transcript, finalSystemPrompt, finalUserPrompt, modelName);
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        lastError = errorText;
+        continue;
+      }
+
+      const data = await response.json();
+      return res.status(200).json(data);
+    } catch (error) {
+      lastError = error instanceof Error ? error.message : 'Unknown error';
+      // Continue to next model fallback
     }
-
-    const data = await response.json();
-    return res.status(200).json(data);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'Unknown error';
-    return res.status(500).json({ error: message });
   }
+
+  return res.status(504).json({ error: `NIM timeout or all models failed: ${lastError}` });
 }

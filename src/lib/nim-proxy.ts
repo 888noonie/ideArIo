@@ -9,23 +9,37 @@ export interface NIMResponse {
 }
 
 export async function generateIdearioFromTranscript(transcript: string): Promise<string> {
-  const response = await fetch('/api/nim-proxy', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      transcript,
-      systemPrompt: SYSTEM_PROMPT,
-      userPrompt: buildUserPrompt(transcript),
-    }),
-  });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15000); // 15s client timeout
 
-  if (!response.ok) {
-    const error = await response.text();
-    throw new Error(`NIM proxy failed: ${error}`);
+  try {
+    const response = await fetch('/api/nim-proxy', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        transcript,
+        systemPrompt: SYSTEM_PROMPT,
+        userPrompt: buildUserPrompt(transcript),
+      }),
+      signal: controller.signal,
+    });
+
+    clearTimeout(timeout);
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(`NIM proxy failed: ${error}`);
+    }
+
+    const data = (await response.json()) as NIMResponse;
+    return data.choices[0]?.message?.content || '';
+  } catch (error) {
+    clearTimeout(timeout);
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new Error('NIM proxy timed out. Please try again.');
+    }
+    throw error;
   }
-
-  const data = (await response.json()) as NIMResponse;
-  return data.choices[0]?.message?.content || '';
 }
