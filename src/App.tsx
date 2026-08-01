@@ -1,9 +1,11 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { VoicePanel } from './components/VoicePanel';
+import { VoicePanel, type InputMode } from './components/VoicePanel';
 import { IdeaCanvas } from './components/IdeaCanvas';
 import { StatusBar } from './components/StatusBar';
+import { DebugOverlay } from './components/DebugOverlay';
 import { useSpeechRecognition } from './hooks/useSpeechRecognition';
 import { useSpeechSynthesis } from './hooks/useSpeechSynthesis';
+import { useWakeWord } from './hooks/useWakeWord';
 import { generateIdearioFromTranscript } from './lib/nim-proxy';
 import { parseIdearioYaml, serializeIdearioYaml } from './lib/yaml-builder';
 import { saveIdearioToGist } from './lib/gist-client';
@@ -12,11 +14,22 @@ import {
   loadSelectedModelId,
   saveSelectedModelId,
 } from './lib/model-registry';
+import { loadTheme, saveTheme, applyTheme, type Theme } from './lib/theme';
 import type { ArioState, IdearioYAML, SavedIdeario } from './types/ideario';
 import type { ModelInfo } from './lib/model-registry';
 
 function generateId(): string {
   return `idea-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+const WAKE_MODE_KEY = 'ideario-wake-mode';
+
+function loadWakeMode(): boolean {
+  try {
+    return localStorage.getItem(WAKE_MODE_KEY) === 'true';
+  } catch {
+    return false;
+  }
 }
 
 export default function App() {
@@ -26,19 +39,63 @@ export default function App() {
   const [online, setOnline] = useState(true);
   const [syncStatus, setSyncStatus] = useState<'synced' | 'pending'>('synced');
   const [selectedModelId, setSelectedModelId] = useState<string>(loadSelectedModelId);
+  const [inputMode, setInputMode] = useState<InputMode>('voice');
+  const [wakeMode, setWakeMode] = useState<boolean>(loadWakeMode);
+  const [theme, setTheme] = useState<Theme>(loadTheme);
+  const [showDebug, setShowDebug] = useState(false);
 
   const {
     transcript,
     interimTranscript,
     isListening,
     error: speechError,
+    noSpeech,
+    clearNoSpeech,
     startListening,
     stopListening,
     resetTranscript,
+    supported: speechSupported,
   } = useSpeechRecognition();
 
   const { cue, speak } = useSpeechSynthesis();
   const processingRef = useRef(false);
+
+  // Fall back to text input when the Web Speech API is unavailable.
+  useEffect(() => {
+    if (!speechSupported) {
+      setInputMode('text');
+      setWakeMode(false);
+    }
+  }, [speechSupported]);
+
+  // ----- Wake word ("Hey Ario") -----
+  const wakeModeRef = useRef(wakeMode);
+  useEffect(() => {
+    wakeModeRef.current = wakeMode;
+    try {
+      localStorage.setItem(WAKE_MODE_KEY, String(wakeMode));
+    } catch {
+      // Ignore localStorage errors
+    }
+  }, [wakeMode]);
+
+  // Defined after handleSpeechFinalized below via ref to avoid circular deps.
+  const processCommandRef = useRef<(text: string) => void>(() => {});
+
+  const wake = useWakeWord({
+    enabled: wakeMode && speechSupported && inputMode === 'voice',
+    onCommand: useCallback((text: string) => {
+      processCommandRef.current(text);
+    }, []),
+    onAutoPause: useCallback(() => {
+      speak('Wake mode paused after silence. Tap the orb to resume.', 'normal');
+    }, [speak]),
+    onDisabled: useCallback((reason: string) => {
+      setWakeMode(false);
+      setArioState('error');
+      speak(`Wake mode turned off: microphone error (${reason}). Tap to use voice manually, or type instead.`, 'critical');
+    }, [speak]),
+  });
 
   // Load saved ideas on mount
   useEffect(() => {
@@ -69,14 +126,43 @@ export default function App() {
     };
   }, [cue]);
 
-  // Sync state when listening stops
+  // Sync state when listening stops with a transcript
   useEffect(() => {
     if (!isListening && transcript && !processingRef.current) {
-      handleSpeechFinalized(transcript);
+      handleSpeechFinalized(transcript, 'voice');
     }
   }, [isListening, transcript]);
 
-  const handleSpeechFinalized = useCallback(async (finalTranscript: string) => {
+  // Mobile fix: if recognition ends with NO transcript and NO error
+  // (silence, mobile speech-service hiccup), never leave the orb stuck
+  // in "listening" — reset to idle. The reset must only fire on a genuine
+  // listening→ended transition: `startListening()` is async, so there is a
+  // start-up window between the tap (state set to 'listening') and the
+  // recognition `onstart` where `isListening` is still false. Tracking
+  // `wasListeningRef` keeps the orb in 'listening' through that window.
+  const wasListeningRef = useRef(false);
+  useEffect(() => {
+    if (isListening) {
+      wasListeningRef.current = true;
+      return;
+    }
+    if (wasListeningRef.current && !transcript && arioState === 'listening' && !processingRef.current) {
+      setArioState('idle');
+    }
+    wasListeningRef.current = false;
+  }, [isListening, transcript, arioState]);
+
+  // Surface no-speech (error event or 7s watchdog) as a gentle,
+  // recoverable state with voice + visual feedback.
+  useEffect(() => {
+    if (noSpeech) {
+      clearNoSpeech();
+      setArioState((prev) => (prev === 'thinking' ? prev : 'idle'));
+      speak("I didn't hear anything — tap and try again, or use Type instead.", 'critical');
+    }
+  }, [noSpeech, clearNoSpeech, speak]);
+
+  const handleSpeechFinalized = useCallback(async (finalTranscript: string, source: 'voice' | 'manual') => {
     if (!finalTranscript.trim()) return;
 
     processingRef.current = true;
@@ -85,14 +171,14 @@ export default function App() {
 
     try {
       const rawYaml = await generateIdearioFromTranscript(finalTranscript, selectedModelId);
-      const parsed = parseIdearioYaml(rawYaml);
+      const parsed = parseIdearioYaml(rawYaml, finalTranscript);
 
       if (!parsed) {
         throw new Error('Could not parse idea');
       }
 
       setIdeario(parsed);
-      await handleSave(parsed);
+      await handleSave(parsed, source);
       cue('saved');
       setArioState('idle');
     } catch (error) {
@@ -103,11 +189,37 @@ export default function App() {
     } finally {
       processingRef.current = false;
       resetTranscript();
+      // In wake mode, return to listening for "Hey Ario".
+      if (wakeModeRef.current) {
+        wake.resume();
+      }
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cue, resetTranscript, selectedModelId, speak]);
+
+  // Keep the wake-word command handler pointing at the latest
+  // handleSpeechFinalized — assigned in an effect, not during render.
+  useEffect(() => {
+    processCommandRef.current = (text: string) => {
+      handleSpeechFinalized(text, 'voice');
+    };
+  }, [handleSpeechFinalized]);
 
   const handleActivate = useCallback(() => {
     if (arioState === 'thinking') return;
+
+    // In wake mode the orb toggles wake pause/resume instead of a
+    // one-shot recording session.
+    if (wakeMode) {
+      if (wake.paused) {
+        wake.resume();
+        cue('wake');
+      } else {
+        wake.pause();
+        speak('Wake mode paused. Tap the orb to resume.', 'normal');
+      }
+      return;
+    }
 
     if (isListening) {
       stopListening();
@@ -118,9 +230,29 @@ export default function App() {
       cue('listening');
       startListening();
     }
-  }, [arioState, isListening, startListening, stopListening, resetTranscript, cue]);
+  }, [arioState, wakeMode, wake, isListening, startListening, stopListening, resetTranscript, cue, speak]);
 
-  const handleSave = useCallback(async (ideaToSave: IdearioYAML) => {
+  const handleToggleWakeMode = useCallback(() => {
+    setWakeMode((prev) => {
+      const next = !prev;
+      if (next) {
+        setIdeario(null);
+        resetTranscript();
+        setArioState('idle');
+        cue('wake');
+      } else {
+        setArioState('idle');
+        speak('Wake mode off.', 'normal');
+      }
+      return next;
+    });
+  }, [cue, resetTranscript, speak]);
+
+  const handleTextSubmit = useCallback((text: string) => {
+    handleSpeechFinalized(text, 'manual');
+  }, [handleSpeechFinalized]);
+
+  const handleSave = useCallback(async (ideaToSave: IdearioYAML, source: 'voice' | 'manual') => {
     const id = generateId();
     const yamlString = serializeIdearioYaml(ideaToSave);
 
@@ -129,7 +261,7 @@ export default function App() {
       id,
       gist_id: undefined,
       synced: false,
-      source: 'voice',
+      source,
     };
 
     await saveToLocalDB(saved);
@@ -174,9 +306,9 @@ export default function App() {
 
   const handleManualSave = useCallback(() => {
     if (ideario) {
-      handleSave(ideario);
+      handleSave(ideario, inputMode === 'text' ? 'manual' : 'voice');
     }
-  }, [ideario, handleSave]);
+  }, [ideario, handleSave, inputMode]);
 
   const handleClear = useCallback(() => {
     setIdeario(null);
@@ -190,13 +322,32 @@ export default function App() {
     speak(`Switched to ${model.name}`, 'normal');
   }, [speak]);
 
-  // Handle speech errors
+  const handleToggleTheme = useCallback(() => {
+    setTheme((prev) => {
+      const next: Theme = prev === 'light' ? 'dark' : 'light';
+      applyTheme(next);
+      saveTheme(next);
+      return next;
+    });
+  }, []);
+
+  const handleToggleDebug = useCallback(() => {
+    setShowDebug((prev) => !prev);
+  }, []);
+
+  // Apply persisted theme on mount (main.tsx also applies pre-paint).
   useEffect(() => {
-    if (speechError) {
+    applyTheme(theme);
+  }, [theme]);
+
+  // Handle speech errors (unsupported browsers degrade to text input
+  // instead of nagging the user on load).
+  useEffect(() => {
+    if (speechError && speechSupported) {
       setArioState('error');
       speak('I did not catch that. Please try again.', 'critical');
     }
-  }, [speechError, speak]);
+  }, [speechError, speechSupported, speak]);
 
   const allSynced = savedIdeas.length === 0 || savedIdeas.every((i) => i.synced);
 
@@ -216,6 +367,13 @@ export default function App() {
             onSave={handleManualSave}
             onClear={handleClear}
             canSave={!!ideario}
+            inputMode={inputMode}
+            onInputModeChange={setInputMode}
+            onTextSubmit={handleTextSubmit}
+            speechSupported={speechSupported}
+            wakeMode={wakeMode}
+            wakePaused={wake.paused}
+            onToggleWakeMode={handleToggleWakeMode}
           />
 
           <div className="ario-panel min-h-0">
@@ -230,8 +388,13 @@ export default function App() {
           ideaCount={savedIdeas.length}
           selectedModelId={selectedModelId}
           onModelChange={handleModelChange}
+          theme={theme}
+          onToggleTheme={handleToggleTheme}
+          onToggleDebug={handleToggleDebug}
         />
       </div>
+
+      {showDebug && <DebugOverlay onClose={handleToggleDebug} />}
     </div>
   );
 }

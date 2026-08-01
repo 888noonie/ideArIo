@@ -4,6 +4,10 @@ interface ArioOrbProps {
   state: ArioState;
   onActivate: () => void;
   disabled?: boolean;
+  /** Wake-word mode is armed — orb shows "Say 'Hey Ario'". */
+  wakeMode?: boolean;
+  /** Wake mode is temporarily paused (silence timeout). */
+  wakePaused?: boolean;
 }
 
 const STATE_CONFIG: Record<ArioState, { label: string; color: string; ring: string }> = {
@@ -34,10 +38,24 @@ const STATE_CONFIG: Record<ArioState, { label: string; color: string; ring: stri
   },
 };
 
-export function ArioOrb({ state, onActivate, disabled = false }: ArioOrbProps) {
+export function ArioOrb({ state, onActivate, disabled = false, wakeMode = false, wakePaused = false }: ArioOrbProps) {
   const config = STATE_CONFIG[state];
-  const isListening = state === 'listening';
+  const isListening = state === 'listening' || (wakeMode && !wakePaused && state === 'idle');
   const isThinking = state === 'thinking';
+
+  const label = wakeMode
+    ? wakePaused
+      ? 'Wake mode paused — tap to resume'
+      : state === 'idle'
+        ? "Say 'Hey Ario'"
+        : config.label
+    : config.label;
+
+  const subtitle = wakeMode
+    ? wakePaused
+      ? 'Ario is resting'
+      : 'Hands-free mode is on'
+    : 'Ario is ready';
 
   return (
     <button
@@ -45,7 +63,7 @@ export function ArioOrb({ state, onActivate, disabled = false }: ArioOrbProps) {
       onClick={onActivate}
       disabled={disabled}
       className="relative flex flex-col items-center justify-center gap-4 group focus:outline-none"
-      aria-label={config.label}
+      aria-label={label}
     >
       {/* Outer pulsing ring */}
       <div
@@ -60,7 +78,8 @@ export function ArioOrb({ state, onActivate, disabled = false }: ArioOrbProps) {
         className={`relative w-40 h-40 rounded-full ${config.color} flex items-center justify-center
                     shadow-[0_0_60px_rgba(0,245,212,0.3)] transition-all duration-300
                     group-active:scale-95 group-hover:shadow-[0_0_80px_rgba(0,245,212,0.45)]
-                    ${disabled ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer'}`}
+                    ${disabled ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer'}
+                    ${wakeMode && !wakePaused ? 'animate-glow' : ''}`}
       >
         {/* Inner gradient */}
         <div className="absolute inset-2 rounded-full bg-gradient-to-br from-white/20 to-transparent" />
@@ -83,12 +102,20 @@ export function ArioOrb({ state, onActivate, disabled = false }: ArioOrbProps) {
             </>
           )}
         </svg>
+
+        {/* Wake-mode badge */}
+        {wakeMode && (
+          <div className="absolute -top-2 -right-2 px-3 py-1 rounded-full bg-ario-dark border border-ario-turquoise/40
+                          text-ario-turquoise text-xs font-semibold uppercase tracking-wider">
+            {wakePaused ? 'Paused' : 'Wake'}
+          </div>
+        )}
       </div>
 
       {/* State label */}
       <div className="text-center">
-        <p className="text-ario-text text-lg font-medium">{config.label}</p>
-        <p className="text-ario-muted text-sm">Ario is ready</p>
+        <p className="text-ario-text text-lg font-medium">{label}</p>
+        <p className="text-ario-muted text-sm">{subtitle}</p>
       </div>
     </button>
   );
