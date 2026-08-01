@@ -1,5 +1,6 @@
 import type { SavedIdeario } from '../types/ideario';
 import { parseIdearioYaml } from './yaml-builder';
+import { addToGistIndex, loadGistIndex } from './gist-index';
 
 const GITHUB_API = 'https://api.github.com';
 
@@ -16,6 +17,14 @@ export interface GistCreatePayload {
 
 function getToken(): string | null {
   return import.meta.env.VITE_GITHUB_TOKEN || null;
+}
+
+function headers(token: string): Record<string, string> {
+  return {
+    Authorization: `Bearer ${token}`,
+    Accept: 'application/vnd.github+json',
+    'X-GitHub-Api-Version': '2022-11-28',
+  };
 }
 
 function slugify(title: string): string {
@@ -60,12 +69,7 @@ export async function saveIdearioToGist(
 
   const response = await fetch(`${GITHUB_API}/gists`, {
     method: 'POST',
-    headers: {
-      Authorization: `Bearer ${token}`,
-      'Content-Type': 'application/json',
-      Accept: 'application/vnd.github+json',
-      'X-GitHub-Api-Version': '2022-11-28',
-    },
+    headers: { ...headers(token), 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   });
 
@@ -75,19 +79,63 @@ export async function saveIdearioToGist(
   }
 
   const data = (await response.json()) as { id: string; html_url: string };
+
+  // Best-effort: keep the vault index up to date. Failures are fine — the
+  // loader falls back to a full Gist scan when the index is missing/stale.
+  addToGistIndex(token, {
+    id: ideario.id,
+    gist_id: data.id,
+    title: ideario.title,
+    created_at: ideario.created_at,
+  }).catch((error) => console.warn('Gist index update failed:', error));
+
   return { gist_id: data.id, url: data.html_url };
 }
 
-export async function loadIdeariosFromGists(): Promise<SavedIdeario[]> {
-  const token = getToken();
-  if (!token) return [];
+interface GistDetail {
+  id: string;
+  files: Record<string, { content?: string; raw_url?: string; truncated?: boolean }>;
+}
 
+/** Fetch a single idea Gist and parse its YAML file. */
+async function loadIdeaFromGist(token: string, gistId: string, localId?: string): Promise<SavedIdeario | null> {
+  try {
+    const response = await fetch(`${GITHUB_API}/gists/${gistId}`, { headers: headers(token) });
+    if (!response.ok) return null;
+
+    const gist = (await response.json()) as GistDetail;
+    const yamlEntry = Object.entries(gist.files).find(([name]) => name.endsWith('.yaml'));
+    if (!yamlEntry) return null;
+
+    const [, file] = yamlEntry;
+    let content = file.content;
+    if (!content || file.truncated) {
+      if (!file.raw_url) return null;
+      content = await fetch(file.raw_url).then((r) => (r.ok ? r.text() : ''));
+    }
+    if (!content) return null;
+
+    const parsed = parseIdearioYaml(content);
+    if (!parsed) return null;
+
+    return {
+      ...parsed,
+      // Prefer the local idea id from the vault index when available so
+      // loaded ideas keep matching their IndexedDB records.
+      id: localId || gist.id,
+      gist_id: gist.id,
+      synced: true,
+      source: 'voice',
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** Scan every Gist for Ideario YAML files. */
+async function scanGistsForIdeas(token: string): Promise<SavedIdeario[]> {
   const response = await fetch(`${GITHUB_API}/gists?per_page=100`, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-      Accept: 'application/vnd.github+json',
-      'X-GitHub-Api-Version': '2022-11-28',
-    },
+    headers: headers(token),
   });
 
   if (!response.ok) {
@@ -119,4 +167,62 @@ export async function loadIdeariosFromGists(): Promise<SavedIdeario[]> {
   }
 
   return results;
+}
+
+/**
+ * Load the vault. Prefers the "ideario-index" Gist (one index read + one
+ * fetch per idea Gist) and gracefully falls back to scanning all Gists
+ * when the index is missing or unreadable.
+ */
+export async function loadIdeariosFromGists(): Promise<SavedIdeario[]> {
+  const token = getToken();
+  if (!token) return [];
+
+  // Fast path: index-driven loading.
+  let index: Awaited<ReturnType<typeof loadGistIndex>> = null;
+  let indexed: SavedIdeario[] | null = null;
+  try {
+    index = await loadGistIndex(token);
+    if (index && index.entries.length > 0) {
+      const results = await Promise.all(
+        index.entries.map((entry) => loadIdeaFromGist(token, entry.gist_id, entry.id))
+      );
+      indexed = results.filter((r): r is SavedIdeario => r !== null);
+    }
+  } catch {
+    // Fall through to the full scan
+  }
+
+  // Fallback: no usable index — scan every Gist for Ideario YAML files.
+  if (!indexed) {
+    return scanGistsForIdeas(token);
+  }
+
+  // The index can be stale (ideas saved before the index existed are not
+  // listed). Merge with a full scan, deduped by gist id, so pre-index ideas
+  // are not hidden.
+  const scanned = await scanGistsForIdeas(token);
+  const seen = new Set(indexed.map((idea) => idea.gist_id));
+  const merged = [...indexed];
+  for (const idea of scanned) {
+    if (!seen.has(idea.gist_id)) {
+      merged.push(idea);
+    }
+  }
+
+  // Opportunistically backfill the index with ideas the scan found but the
+  // index doesn't know about. Best-effort — failures are fine.
+  const indexedGistIds = new Set(index?.entries.map((e) => e.gist_id) ?? []);
+  for (const idea of merged) {
+    if (idea.gist_id && !indexedGistIds.has(idea.gist_id)) {
+      addToGistIndex(token, {
+        id: idea.id,
+        gist_id: idea.gist_id,
+        title: idea.title,
+        created_at: idea.created_at,
+      }).catch((error) => console.warn('Gist index backfill failed:', error));
+    }
+  }
+
+  return merged;
 }

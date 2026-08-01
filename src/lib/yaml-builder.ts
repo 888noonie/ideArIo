@@ -1,10 +1,11 @@
 import * as yaml from 'js-yaml';
 import type { IdearioYAML } from '../types/ideario';
+import { migrateIdeario, SCHEMA_VERSION } from './yaml-migrations';
 
 export const SYSTEM_PROMPT = `You are Ario, the noble idea companion for Ideario.
 Convert the user's spoken idea into a valid Ideario YAML object.
 
-Schema:
+Schema (version ${SCHEMA_VERSION}):
 ---
 title: string (short, catchy name for the idea)
 category: enum[product, business, creative, technical, personal]
@@ -15,6 +16,12 @@ nodes:
     label: string (short display label)
     type: enum[concept, action, question, resource]
     connections: string[] (ids of related nodes)
+context: (optional)
+  location: string (optional, e.g. "driving on I-95")
+  time: string (optional, ISO timestamp of capture)
+  vehicle: string (optional, e.g. "Hyundai Tucson 2026")
+artifacts: string[] (optional, URLs or references to external assets mentioned)
+version: "${SCHEMA_VERSION}"
 created_at: ISO timestamp (optional)
 updated_at: ISO timestamp (optional)
 ---
@@ -24,13 +31,22 @@ Rules:
 - The first node should have id "core" and type "concept".
 - Create 3-7 nodes total.
 - Make connections meaningful.
-- If the idea is vague, create question nodes to explore it.`;
+- If the idea is vague, create question nodes to explore it.
+- Only include context/artifacts fields when the idea actually mentions them.`;
 
 export function buildUserPrompt(transcript: string): string {
   return `Spoken idea: "${transcript}"`;
 }
 
-export function parseIdearioYaml(raw: string): IdearioYAML | null {
+/**
+ * Parse raw YAML text from the model into an IdearioYAML object.
+ * Backward compatible: legacy v1.0 ideas (without transcript/context/
+ * artifacts/version) are migrated via yaml-migrations.
+ *
+ * @param raw Raw YAML text (markdown fences tolerated).
+ * @param transcript Optional original transcript to stamp onto the idea.
+ */
+export function parseIdearioYaml(raw: string, transcript?: string): IdearioYAML | null {
   try {
     // Strip markdown fences if the model added them
     const cleaned = raw
@@ -40,29 +56,15 @@ export function parseIdearioYaml(raw: string): IdearioYAML | null {
       .trim();
 
     const parsed = yaml.load(cleaned);
-    if (!parsed || typeof parsed !== 'object') return null;
+    const migrated = migrateIdeario(parsed);
+    if (!migrated) return null;
 
-    const data = parsed as Partial<IdearioYAML>;
+    // Stamp the original transcript if the model didn't include it.
+    if (transcript && !migrated.transcript) {
+      migrated.transcript = transcript;
+    }
 
-    // Validate required fields
-    if (!data.title || !Array.isArray(data.nodes)) return null;
-
-    const now = new Date().toISOString();
-
-    return {
-      title: String(data.title),
-      category: validateCategory(data.category),
-      summary: String(data.summary || ''),
-      tags: Array.isArray(data.tags) ? data.tags.map(String) : [],
-      nodes: data.nodes.map((n, i) => ({
-        id: String(n.id || `node-${i}`),
-        label: String(n.label || 'Untitled'),
-        type: validateNodeType(n.type),
-        connections: Array.isArray(n.connections) ? n.connections.map(String) : [],
-      })),
-      created_at: data.created_at || now,
-      updated_at: data.updated_at || now,
-    };
+    return migrated;
   } catch {
     return null;
   }
@@ -74,14 +76,4 @@ export function serializeIdearioYaml(ideario: IdearioYAML): string {
     lineWidth: -1,
     sortKeys: false,
   });
-}
-
-function validateCategory(value: unknown): IdearioYAML['category'] {
-  const valid: IdearioYAML['category'][] = ['product', 'business', 'creative', 'technical', 'personal'];
-  return valid.includes(value as IdearioYAML['category']) ? (value as IdearioYAML['category']) : 'creative';
-}
-
-function validateNodeType(value: unknown): IdearioYAML['nodes'][number]['type'] {
-  const valid: IdearioYAML['nodes'][number]['type'][] = ['concept', 'action', 'question', 'resource'];
-  return valid.includes(value as IdearioYAML['nodes'][number]['type']) ? (value as IdearioYAML['nodes'][number]['type']) : 'concept';
 }
