@@ -82,6 +82,12 @@ export interface SpeechSynthesisHook {
   cue: (type: ArioCue) => void;
   speaking: boolean;
   supported: boolean;
+  /** Last spoken/cued line — always set, even when audio is unavailable,
+   *  so the UI can show it as a car-safe subtitle. Null once cleared. */
+  lastCue: { text: string; ts: number } | null;
+  /** False when the TTS engine is missing or repeatedly failing (e.g.
+   *  Android WebView without a speech engine) — UI should stay visual. */
+  ttsAvailable: boolean;
 }
 
 export type ArioCue =

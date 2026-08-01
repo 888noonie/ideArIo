@@ -31,6 +31,20 @@ body {
 }
 
 @layer components {
+  /* Full-viewport app shell — fills the actual browser window (car
+     touchscreen WebView, phone, desktop) instead of letterboxing to a
+     fixed 8:3 box. Uses dynamic viewport height so browser chrome and
+     split-screen windows don't shrink the app. */
+  .ario-shell {
+    width: 100vw;
+    height: 100vh;
+    height: 100dvh;
+    padding: calc(8px + env(safe-area-inset-top, 0px))
+             calc(8px + env(safe-area-inset-right, 0px))
+             calc(8px + env(safe-area-inset-bottom, 0px))
+             calc(8px + env(safe-area-inset-left, 0px));
+  }
+
   .ario-panel {
     @apply bg-ario-grey rounded-3xl border border-white/5 relative overflow-hidden;
   }

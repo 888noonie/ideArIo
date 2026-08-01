@@ -19,6 +19,8 @@ interface VoicePanelProps {
   wakeMode: boolean;
   wakePaused: boolean;
   onToggleWakeMode: () => void;
+  cueText: string | null;
+  ttsAvailable: boolean;
 }
 
 export function VoicePanel({
@@ -36,6 +38,8 @@ export function VoicePanel({
   wakeMode,
   wakePaused,
   onToggleWakeMode,
+  cueText,
+  ttsAvailable,
 }: VoicePanelProps) {
   const displayText = interimTranscript || transcript;
 
@@ -62,6 +66,19 @@ export function VoicePanel({
           </button>
         )}
       </div>
+
+      {/* Ario voice-feedback subtitle — always visual, so feedback still
+          lands when the browser's TTS engine is missing or muted. */}
+      {(cueText || !ttsAvailable) && (
+        <div className="mb-4 px-4 py-3 rounded-2xl bg-ario-card/70 border border-ario-turquoise/20">
+          <p className="text-ario-text text-lg leading-snug">
+            {!ttsAvailable && (
+              <span className="text-ario-muted">(silent mode) </span>
+            )}
+            {cueText ?? 'Voice feedback unavailable in this browser — watch here for responses.'}
+          </p>
+        </div>
+      )}
 
       {inputMode === 'text' ? (
         <div className="flex-1 flex flex-col justify-center">

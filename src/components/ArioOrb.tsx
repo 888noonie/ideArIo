@@ -75,7 +75,7 @@ export function ArioOrb({ state, onActivate, disabled = false, wakeMode = false,
 
       {/* Orb */}
       <div
-        className={`relative w-40 h-40 rounded-full ${config.color} flex items-center justify-center
+        className={`relative w-[clamp(96px,24vh,160px)] h-[clamp(96px,24vh,160px)] rounded-full ${config.color} flex items-center justify-center
                     shadow-[0_0_60px_rgba(0,245,212,0.3)] transition-all duration-300
                     group-active:scale-95 group-hover:shadow-[0_0_80px_rgba(0,245,212,0.45)]
                     ${disabled ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer'}
@@ -86,7 +86,7 @@ export function ArioOrb({ state, onActivate, disabled = false, wakeMode = false,
 
         {/* Face / icon */}
         <svg
-          className="relative z-10 w-16 h-16 text-ario-dark"
+          className="relative z-10 w-[clamp(40px,10vh,64px)] h-[clamp(40px,10vh,64px)] text-ario-dark"
           fill="none"
           viewBox="0 0 24 24"
           stroke="currentColor"

@@ -57,7 +57,7 @@ export default function App() {
     supported: speechSupported,
   } = useSpeechRecognition();
 
-  const { cue, speak } = useSpeechSynthesis();
+  const { cue, speak, lastCue, ttsAvailable } = useSpeechSynthesis();
   const processingRef = useRef(false);
 
   // Fall back to text input when the Web Speech API is unavailable.
@@ -352,8 +352,8 @@ export default function App() {
   const allSynced = savedIdeas.length === 0 || savedIdeas.every((i) => i.synced);
 
   return (
-    <div className="w-screen h-screen bg-ario-dark flex items-center justify-center p-4 overflow-hidden">
-      <div className="w-full max-w-[1920px] aspect-[8/3] max-h-[90vh] flex flex-col bg-ario-dark rounded-[32px] overflow-hidden border border-white/5 shadow-2xl">
+    <div className="ario-shell bg-ario-dark overflow-hidden">
+      <div className="h-full w-full flex flex-col bg-ario-dark rounded-2xl overflow-hidden border border-white/5 shadow-2xl">
         {/* Top dust divider */}
         <div className="ario-divider" />
 
@@ -374,6 +374,8 @@ export default function App() {
             wakeMode={wakeMode}
             wakePaused={wake.paused}
             onToggleWakeMode={handleToggleWakeMode}
+            cueText={lastCue?.text ?? null}
+            ttsAvailable={ttsAvailable}
           />
 
           <div className="ario-panel min-h-0">
