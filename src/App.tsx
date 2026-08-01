@@ -6,7 +6,7 @@ import { useSpeechRecognition } from './hooks/useSpeechRecognition';
 import { useSpeechSynthesis } from './hooks/useSpeechSynthesis';
 import { generateIdearioFromTranscript } from './lib/nim-proxy';
 import { parseIdearioYaml, serializeIdearioYaml } from './lib/yaml-builder';
-import { saveIdearioToGist } from './lib/gist-client';
+import { isGistSyncEnabled, saveIdearioToGist } from './lib/gist-client';
 import { saveToLocalDB, loadFromLocalDB, markAsSynced } from './lib/storage';
 import {
   loadSelectedModelId,
@@ -39,6 +39,11 @@ export default function App() {
 
   const { cue, speak } = useSpeechSynthesis();
   const processingRef = useRef(false);
+  const savedIdeasRef = useRef<SavedIdeario[]>([]);
+
+  useEffect(() => {
+    savedIdeasRef.current = savedIdeas;
+  }, [savedIdeas]);
 
   // Load saved ideas on mount
   useEffect(() => {
@@ -47,12 +52,78 @@ export default function App() {
       .catch(() => setSavedIdeas([]));
   }, []);
 
+  const handleSave = useCallback(async (ideaToSave: IdearioYAML) => {
+    const id = generateId();
+    const yamlString = serializeIdearioYaml(ideaToSave);
+
+    const saved: SavedIdeario = {
+      ...ideaToSave,
+      id,
+      gist_id: undefined,
+      synced: false,
+      source: 'voice',
+    };
+
+    await saveToLocalDB(saved);
+    setSavedIdeas((prev) => [saved, ...prev]);
+    setSyncStatus('pending');
+
+    if (navigator.onLine && isGistSyncEnabled()) {
+      try {
+        const { gist_id } = await saveIdearioToGist(saved, yamlString);
+        await markAsSynced(id, gist_id);
+        setSavedIdeas((prev) => prev.map((idea) => (
+          idea.id === id ? { ...idea, gist_id, synced: true } : idea
+        )));
+        setSyncStatus('synced');
+        cue('synced');
+      } catch (error) {
+        console.warn('Gist sync failed:', error);
+        setSyncStatus('pending');
+      }
+    }
+  }, [cue]);
+
+  const syncPendingIdeas = useCallback(async () => {
+    const pending = savedIdeasRef.current.filter((idea) => !idea.synced);
+    if (pending.length === 0) {
+      setSyncStatus('synced');
+      return;
+    }
+    if (!navigator.onLine || !isGistSyncEnabled()) {
+      setSyncStatus('pending');
+      return;
+    }
+
+    const syncedGists = new Map<string, string>();
+    let hasFailures = false;
+    for (const idea of pending) {
+      try {
+        const yamlString = serializeIdearioYaml(idea);
+        const { gist_id } = await saveIdearioToGist(idea, yamlString);
+        await markAsSynced(idea.id, gist_id);
+        syncedGists.set(idea.id, gist_id);
+      } catch (error) {
+        console.warn('Failed to sync idea:', idea.id, error);
+        hasFailures = true;
+      }
+    }
+
+    if (syncedGists.size > 0) {
+      setSavedIdeas((previous) => previous.map((idea) => {
+        const gistId = syncedGists.get(idea.id);
+        return gistId ? { ...idea, gist_id: gistId, synced: true } : idea;
+      }));
+    }
+    setSyncStatus(hasFailures ? 'pending' : 'synced');
+  }, []);
+
   // Online/offline detection
   useEffect(() => {
     const handleOnline = () => {
       setOnline(true);
       cue('online');
-      syncPendingIdeas();
+      void syncPendingIdeas();
     };
     const handleOffline = () => {
       setOnline(false);
@@ -67,14 +138,7 @@ export default function App() {
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
     };
-  }, [cue]);
-
-  // Sync state when listening stops
-  useEffect(() => {
-    if (!isListening && transcript && !processingRef.current) {
-      handleSpeechFinalized(transcript);
-    }
-  }, [isListening, transcript]);
+  }, [cue, syncPendingIdeas]);
 
   const handleSpeechFinalized = useCallback(async (finalTranscript: string) => {
     if (!finalTranscript.trim()) return;
@@ -104,7 +168,14 @@ export default function App() {
       processingRef.current = false;
       resetTranscript();
     }
-  }, [cue, resetTranscript, selectedModelId, speak]);
+  }, [cue, handleSave, resetTranscript, selectedModelId, speak]);
+
+  // Sync state when listening stops
+  useEffect(() => {
+    if (!isListening && transcript && !processingRef.current) {
+      void handleSpeechFinalized(transcript);
+    }
+  }, [handleSpeechFinalized, isListening, transcript]);
 
   const handleActivate = useCallback(() => {
     if (arioState === 'thinking') return;
@@ -119,58 +190,6 @@ export default function App() {
       startListening();
     }
   }, [arioState, isListening, startListening, stopListening, resetTranscript, cue]);
-
-  const handleSave = useCallback(async (ideaToSave: IdearioYAML) => {
-    const id = generateId();
-    const yamlString = serializeIdearioYaml(ideaToSave);
-
-    const saved: SavedIdeario = {
-      ...ideaToSave,
-      id,
-      gist_id: undefined,
-      synced: false,
-      source: 'voice',
-    };
-
-    await saveToLocalDB(saved);
-    setSavedIdeas((prev) => [saved, ...prev]);
-    setSyncStatus('pending');
-
-    if (navigator.onLine && import.meta.env.VITE_GITHUB_TOKEN) {
-      try {
-        const { gist_id } = await saveIdearioToGist(saved, yamlString);
-        await markAsSynced(id, gist_id);
-        saved.gist_id = gist_id;
-        saved.synced = true;
-        setSavedIdeas((prev) => prev.map((i) => (i.id === id ? saved : i)));
-        setSyncStatus('synced');
-        cue('synced');
-      } catch (error) {
-        console.warn('Gist sync failed:', error);
-        setSyncStatus('pending');
-      }
-    }
-  }, [cue]);
-
-  const syncPendingIdeas = useCallback(async () => {
-    const pending = savedIdeas.filter((i) => !i.synced);
-    if (pending.length === 0) return;
-
-    for (const idea of pending) {
-      try {
-        const yamlString = serializeIdearioYaml(idea);
-        const { gist_id } = await saveIdearioToGist(idea, yamlString);
-        await markAsSynced(idea.id, gist_id);
-        idea.gist_id = gist_id;
-        idea.synced = true;
-      } catch (error) {
-        console.warn('Failed to sync idea:', idea.id, error);
-      }
-    }
-
-    setSavedIdeas([...savedIdeas]);
-    setSyncStatus('synced');
-  }, [savedIdeas]);
 
   const handleManualSave = useCallback(() => {
     if (ideario) {

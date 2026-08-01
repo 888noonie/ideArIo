@@ -32,6 +32,8 @@ export function buildUserPrompt(transcript: string): string {
 
 export function parseIdearioYaml(raw: string): IdearioYAML | null {
   try {
+    if (raw.length > 30_000) return null;
+
     // Strip markdown fences if the model added them
     const cleaned = raw
       .replace(/^```yaml\s*/i, '')
@@ -39,33 +41,74 @@ export function parseIdearioYaml(raw: string): IdearioYAML | null {
       .replace(/\s*```\s*$/i, '')
       .trim();
 
-    const parsed = yaml.load(cleaned);
+    const parseOptions: yaml.LoadOptions & { maxAliasCount: number } = { maxAliasCount: 20 };
+    const parsed = yaml.load(cleaned, parseOptions);
     if (!parsed || typeof parsed !== 'object') return null;
 
     const data = parsed as Partial<IdearioYAML>;
 
     // Validate required fields
-    if (!data.title || !Array.isArray(data.nodes)) return null;
+    const title = cleanText(data.title, 120);
+    if (!title || !Array.isArray(data.nodes) || data.nodes.length === 0 || data.nodes.length > 12) return null;
 
     const now = new Date().toISOString();
+    const nodes: IdearioYAML['nodes'] = [];
+    const ids = new Set<string>();
+
+    for (const [index, value] of data.nodes.entries()) {
+      if (!value || typeof value !== 'object') continue;
+      const node = value as Partial<IdearioYAML['nodes'][number]>;
+      const id = index === 0 ? 'core' : cleanNodeId(node.id, index);
+      if (ids.has(id)) continue;
+      ids.add(id);
+      nodes.push({
+        id,
+        label: cleanText(node.label, 80) || 'Untitled',
+        type: validateNodeType(node.type),
+        connections: Array.isArray(node.connections) ? node.connections.map(String) : [],
+      });
+    }
+    if (nodes.length === 0) return null;
+
+    const validIds = new Set(nodes.map((node) => node.id));
+    for (const node of nodes) {
+      node.connections = [...new Set(node.connections)]
+        .map((connection) => connection.trim().toLowerCase())
+        .filter((connection) => connection !== node.id && validIds.has(connection));
+    }
 
     return {
-      title: String(data.title),
+      title,
       category: validateCategory(data.category),
-      summary: String(data.summary || ''),
-      tags: Array.isArray(data.tags) ? data.tags.map(String) : [],
-      nodes: data.nodes.map((n, i) => ({
-        id: String(n.id || `node-${i}`),
-        label: String(n.label || 'Untitled'),
-        type: validateNodeType(n.type),
-        connections: Array.isArray(n.connections) ? n.connections.map(String) : [],
-      })),
-      created_at: data.created_at || now,
-      updated_at: data.updated_at || now,
+      summary: cleanText(data.summary, 500),
+      tags: cleanTags(data.tags),
+      nodes,
+      created_at: validTimestamp(data.created_at) || now,
+      updated_at: validTimestamp(data.updated_at) || now,
     };
   } catch {
     return null;
   }
+}
+
+function cleanText(value: unknown, maxLength: number): string {
+  if (typeof value !== 'string' && typeof value !== 'number') return '';
+  return String(value).replace(/\p{Cc}/gu, ' ').replace(/\s+/g, ' ').trim().slice(0, maxLength);
+}
+
+function cleanNodeId(value: unknown, index: number): string {
+  const normalized = cleanText(value, 64).toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-|-$/g, '');
+  return /^[a-z][a-z0-9-]{0,63}$/.test(normalized) ? normalized : `node-${index}`;
+}
+
+function cleanTags(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return [...new Set(value.map((tag) => cleanText(tag, 40)).filter(Boolean))].slice(0, 8);
+}
+
+function validTimestamp(value: unknown): string | null {
+  if (typeof value !== 'string' || Number.isNaN(Date.parse(value))) return null;
+  return value;
 }
 
 export function serializeIdearioYaml(ideario: IdearioYAML): string {
