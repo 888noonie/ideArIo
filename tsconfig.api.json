@@ -8,6 +8,8 @@
     "skipLibCheck": true,
     "strict": true,
     "noEmit": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
     "types": ["@vercel/node"]
   },
   "include": ["api/**/*.ts"]

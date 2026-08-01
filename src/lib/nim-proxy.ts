@@ -1,5 +1,3 @@
-import { SYSTEM_PROMPT, buildUserPrompt } from './yaml-builder';
-
 export interface NIMResponse {
   choices: Array<{
     message: {
@@ -12,8 +10,16 @@ export async function generateIdearioFromTranscript(
   transcript: string,
   modelId?: string
 ): Promise<string> {
+  const normalizedTranscript = transcript.trim();
+  if (!normalizedTranscript) {
+    throw new Error('Please describe an idea before submitting.');
+  }
+  if (normalizedTranscript.length > 4_000) {
+    throw new Error('That idea is too long to process in one request.');
+  }
+
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 15000); // 15s client timeout
+  const timeout = setTimeout(() => controller.abort(), 25_000);
 
   try {
     const response = await fetch('/api/nim-proxy', {
@@ -22,9 +28,7 @@ export async function generateIdearioFromTranscript(
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        transcript,
-        systemPrompt: SYSTEM_PROMPT,
-        userPrompt: buildUserPrompt(transcript),
+        transcript: normalizedTranscript,
         model: modelId,
       }),
       signal: controller.signal,
@@ -38,7 +42,11 @@ export async function generateIdearioFromTranscript(
     }
 
     const data = (await response.json()) as NIMResponse;
-    return data.choices[0]?.message?.content || '';
+    const content = data.choices[0]?.message?.content?.trim();
+    if (!content) {
+      throw new Error('Idea generation returned an empty response.');
+    }
+    return content;
   } catch (error) {
     clearTimeout(timeout);
     if (error instanceof Error && error.name === 'AbortError') {

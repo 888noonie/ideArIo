@@ -10,12 +10,15 @@ interface PositionedNode extends IdearioNode {
   y: number;
 }
 
+const HEADER_SPACE = 120;
+
 function layoutNodes(nodes: IdearioNode[], width: number, height: number): PositionedNode[] {
   if (nodes.length === 0) return [];
 
   const centerX = width / 2;
-  const centerY = height / 2;
-  const radius = Math.min(width, height) * 0.32;
+  const usableHeight = Math.max(height - HEADER_SPACE, 160);
+  const centerY = HEADER_SPACE + usableHeight / 2;
+  const radius = Math.min(width * 0.32, usableHeight * 0.36);
 
   return nodes.map((node, index) => {
     if (node.id === 'core' || index === 0) {
@@ -38,6 +41,10 @@ const NODE_COLORS: Record<IdearioNode['type'], string> = {
   question: '#feca57',
   resource: '#54a0ff',
 };
+
+function displayNodeLabel(label: string): string {
+  return label.length > 17 ? `${label.slice(0, 16)}…` : label;
+}
 
 export function IdeaCanvas({ ideario }: IdeaCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -81,19 +88,25 @@ export function IdeaCanvas({ ideario }: IdeaCanvasProps) {
         ref={containerRef}
         className="w-full h-full flex items-center justify-center text-ario-muted"
       >
-        <div className="text-center">
-          <p className="text-2xl mb-2">Your ideas will appear here</p>
-          <p className="text-sm">Tap Ario and start speaking</p>
+        <div className="text-center ario-empty-state">
+          <div className="ario-empty-orbit mx-auto mb-5">
+            <span className="ario-empty-core" />
+          </div>
+          <p className="text-2xl font-medium text-ario-text mb-2">Your next idea starts here</p>
+          <p className="text-sm max-w-xs">Speak naturally and Ario will shape the important connections.</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div ref={containerRef} className="w-full h-full relative overflow-auto">
+    <div ref={containerRef} className="w-full h-full relative overflow-hidden ario-canvas">
       {/* Header */}
-      <div className="absolute top-4 left-4 right-4 z-10">
-        <h2 className="text-2xl font-semibold text-ario-text truncate">{ideario.title}</h2>
+      <div className="absolute top-4 left-4 right-4 z-10 ario-canvas-header">
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="h-2 w-2 rounded-full bg-ario-turquoise shadow-[0_0_12px_rgba(0,245,212,0.9)]" />
+          <h2 className="text-2xl font-semibold text-ario-text truncate">{ideario.title}</h2>
+        </div>
         <p className="text-ario-muted text-sm mt-1 line-clamp-2">{ideario.summary}</p>
         <div className="flex flex-wrap gap-2 mt-2">
           {ideario.tags.map((tag) => (
@@ -155,7 +168,7 @@ export function IdeaCanvas({ ideario }: IdeaCanvasProps) {
               fontSize={node.id === 'core' ? 14 : 12}
               fontWeight={node.id === 'core' ? 600 : 400}
             >
-              {node.label}
+              {displayNodeLabel(node.label)}
             </text>
             <text
               x={node.x}
@@ -163,7 +176,7 @@ export function IdeaCanvas({ ideario }: IdeaCanvasProps) {
               textAnchor="middle"
               fill={NODE_COLORS[node.type]}
               fontSize="10"
-              style={{ textTransform: 'uppercase' }}
+              className="uppercase"
             >
               {node.type}
             </text>

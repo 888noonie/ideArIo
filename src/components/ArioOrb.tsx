@@ -6,31 +6,31 @@ interface ArioOrbProps {
   disabled?: boolean;
 }
 
-const STATE_CONFIG: Record<ArioState, { label: string; color: string; ring: string }> = {
+const STATE_CONFIG: Record<ArioState, { label: string; color: string; ringClass: string }> = {
   idle: {
     label: 'Tap to speak',
     color: 'bg-ario-turquoise',
-    ring: 'rgba(0, 245, 212, 0.4)',
+    ringClass: 'ario-orb-ring-turquoise-soft',
   },
   listening: {
     label: 'Listening...',
     color: 'bg-ario-turquoise',
-    ring: 'rgba(0, 245, 212, 0.8)',
+    ringClass: 'ario-orb-ring-turquoise-strong',
   },
   thinking: {
     label: 'Thinking...',
     color: 'bg-ario-red',
-    ring: 'rgba(255, 71, 87, 0.6)',
+    ringClass: 'ario-orb-ring-red',
   },
   speaking: {
     label: 'Speaking...',
     color: 'bg-ario-turquoise',
-    ring: 'rgba(0, 245, 212, 0.6)',
+    ringClass: 'ario-orb-ring-turquoise',
   },
   error: {
     label: 'Try again',
     color: 'bg-ario-red',
-    ring: 'rgba(255, 71, 87, 0.8)',
+    ringClass: 'ario-orb-ring-red-strong',
   },
 };
 
@@ -44,21 +44,20 @@ export function ArioOrb({ state, onActivate, disabled = false }: ArioOrbProps) {
       type="button"
       onClick={onActivate}
       disabled={disabled}
-      className="relative flex flex-col items-center justify-center gap-4 group focus:outline-none"
+      className="relative flex flex-col items-center justify-center gap-4 group rounded-full focus:outline-none focus-visible:ring-2 focus-visible:ring-ario-turquoise focus-visible:ring-offset-8 focus-visible:ring-offset-ario-grey"
       aria-label={config.label}
     >
       {/* Outer pulsing ring */}
       <div
-        className={`absolute inset-0 rounded-full transition-all duration-500 ${
+        className={`absolute inset-0 rounded-full transition-all duration-500 ${config.ringClass} ${
           isListening || isThinking ? 'animate-pulse-ring' : 'opacity-0 scale-75'
         }`}
-        style={{ background: `radial-gradient(circle, ${config.ring} 0%, transparent 70%)` }}
       />
 
       {/* Orb */}
       <div
         className={`relative w-40 h-40 rounded-full ${config.color} flex items-center justify-center
-                    shadow-[0_0_60px_rgba(0,245,212,0.3)] transition-all duration-300
+                    shadow-[0_0_60px_rgba(0,245,212,0.3)] transition-all duration-300 ario-orb-core
                     group-active:scale-95 group-hover:shadow-[0_0_80px_rgba(0,245,212,0.45)]
                     ${disabled ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer'}`}
       >
@@ -88,7 +87,7 @@ export function ArioOrb({ state, onActivate, disabled = false }: ArioOrbProps) {
       {/* State label */}
       <div className="text-center">
         <p className="text-ario-text text-lg font-medium">{config.label}</p>
-        <p className="text-ario-muted text-sm">Ario is ready</p>
+        <p className="text-ario-muted text-sm">{isListening ? 'I’m with you' : isThinking ? 'Mapping the connections' : 'Ario is ready'}</p>
       </div>
     </button>
   );
