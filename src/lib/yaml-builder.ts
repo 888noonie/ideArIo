@@ -48,12 +48,24 @@ export function buildUserPrompt(transcript: string): string {
  */
 export function parseIdearioYaml(raw: string, transcript?: string): IdearioYAML | null {
   try {
-    // Strip markdown fences if the model added them
-    const cleaned = raw
-      .replace(/^```yaml\s*/i, '')
-      .replace(/^```\s*/i, '')
+    // Strip reasoning-model think blocks (<think>...</think>) and any
+    // preamble prose — reasoning models (DeepSeek Pro, Kimi) often emit
+    // their reasoning before the actual YAML answer.
+    let cleaned = raw
+      .replace(/<think>[\s\S]*?<\/think>/gi, '')
+      .replace(/^```yaml\s*/im, '')
+      .replace(/^```\s*/im, '')
       .replace(/\s*```\s*$/i, '')
       .trim();
+
+    // If the response has prose before the YAML, start from the schema's
+    // first key.
+    if (!cleaned.startsWith('title:')) {
+      const titleIdx = cleaned.search(/^title:/m);
+      if (titleIdx >= 0) {
+        cleaned = cleaned.slice(titleIdx);
+      }
+    }
 
     const parsed = yaml.load(cleaned);
     const migrated = migrateIdeario(parsed);

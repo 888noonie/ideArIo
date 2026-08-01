@@ -19,18 +19,19 @@ export interface NimProxyResult {
 const NVIDIA_ENDPOINT = 'https://integrate.api.nvidia.com/v1/chat/completions';
 
 // Default model cycle when no specific model is requested.
-// The order matters: try the best first, then fall back to faster/cheaper options.
+// The order matters: try the fast, instruction-following models first
+// (structured YAML extraction), then heavier reasoning models.
 // NOTE: When adding new models to the frontend registry, add strong candidates here too.
 const DEFAULT_MODEL_CYCLE = [
-  'deepseek-ai/deepseek-v4-pro',
   'deepseek-ai/deepseek-v4-flash',
-  'z-ai/glm-5.2',
+  'deepseek-ai/deepseek-v4-pro',
   'moonshotai/kimi-k2.6',
-  'minimaxai/minimax-m3',
   'meta/llama-3.3-70b-instruct',
   'meta/llama-3.1-8b-instruct',
   'mistralai/mistral-large-2-instruct',
   'mistralai/mistral-7b-instruct-v0.3',
+  'z-ai/glm-5.2',
+  'minimaxai/minimax-m3',
 ];
 
 function fetchWithTimeout(
@@ -66,10 +67,14 @@ async function callNIM(
           { role: 'user', content: userPrompt },
         ],
         temperature: 0.3,
-        max_tokens: 400,
+        // Generous ceiling: schema v2 YAML (3-7 nodes + context) needs more
+        // than 400 tokens, and reasoning models spend tokens thinking first.
+        // Truncated YAML was a source of "could not process that idea".
+        max_tokens: 2048,
       }),
     },
-    8000 // 8 second timeout per attempt
+    6000 // 6s per attempt — Vercel caps the function at 10s total,
+    // so the first model must answer fast or we fall through quickly
   );
 }
 
@@ -119,5 +124,11 @@ export async function handleNimProxyRequest(
     }
   }
 
-  return { status: 504, body: { error: `NIM timeout or all models failed: ${lastError}` } };
+  return {
+    status: 504,
+    body: {
+      error: `All AI models failed. Last error: ${String(lastError).slice(0, 200)}`,
+      modelsTried: modelsToTry.length,
+    },
+  };
 }

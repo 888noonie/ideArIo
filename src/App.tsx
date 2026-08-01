@@ -6,7 +6,7 @@ import { DebugOverlay } from './components/DebugOverlay';
 import { useSpeechRecognition } from './hooks/useSpeechRecognition';
 import { useSpeechSynthesis } from './hooks/useSpeechSynthesis';
 import { useWakeWord } from './hooks/useWakeWord';
-import { generateIdearioFromTranscript } from './lib/nim-proxy';
+import { generateIdearioFromTranscript, describeProcessingError } from './lib/nim-proxy';
 import { parseIdearioYaml, serializeIdearioYaml } from './lib/yaml-builder';
 import { saveIdearioToGist } from './lib/gist-client';
 import { saveToLocalDB, loadFromLocalDB, markAsSynced } from './lib/storage';
@@ -185,7 +185,7 @@ export default function App() {
       console.error('Ideario processing failed:', error);
       cue('error');
       setArioState('error');
-      speak('I could not process that idea. Please try again.', 'critical');
+      speak(describeProcessingError(error), 'critical');
     } finally {
       processingRef.current = false;
       resetTranscript();
