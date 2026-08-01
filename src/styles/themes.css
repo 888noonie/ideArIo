@@ -1,0 +1,40 @@
+/*
+ * Ideario theme engine.
+ * Colors are stored as RGB channels so Tailwind can apply opacity modifiers:
+ *   tailwind.config.js -> rgb(var(--bg-card) / <alpha-value>)
+ * Themes are applied via the `data-theme` attribute on <html>.
+ * Default (no attribute, or data-theme="dark") is Neon Turquoise.
+ */
+
+:root,
+[data-theme='dark'] {
+  /* Neon Turquoise (default) — Ario signature */
+  --bg-primary: 10 14 20;        /* #0a0e14 */
+  --bg-secondary: 19 24 32;      /* #131820 */
+  --bg-card: 26 32 48;           /* #1a2030 */
+
+  --accent-primary: 0 245 212;   /* #00f5d4 */
+  --accent-secondary: 255 71 87; /* #ff4757 */
+  --accent-glow: rgba(0, 245, 212, 0.4);
+
+  --text-primary: 232 238 245;   /* #e8eef5 */
+  --text-muted: 136 150 166;     /* #8896a6 */
+
+  color-scheme: dark;
+}
+
+[data-theme='light'] {
+  /* Light Edition — daytime driving, high contrast */
+  --bg-primary: 233 238 243;     /* #e9eef3 */
+  --bg-secondary: 255 255 255;   /* #ffffff */
+  --bg-card: 240 244 248;        /* #f0f4f8 */
+
+  --accent-primary: 0 138 116;   /* #008a74 — turquoise darkened for contrast */
+  --accent-secondary: 225 29 72; /* #e11d48 */
+  --accent-glow: rgba(0, 138, 116, 0.25);
+
+  --text-primary: 16 22 31;      /* #10161f */
+  --text-muted: 91 107 125;      /* #5b6b7d */
+
+  color-scheme: light;
+}

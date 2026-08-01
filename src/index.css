@@ -2,21 +2,8 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Theme color channels live in src/styles/themes.css (data-theme on <html>). */
 :root {
-  /* Base palette */
-  --bg-primary: #0a0e14;
-  --bg-secondary: #131820;
-  --bg-card: #1a2030;
-
-  /* Accents */
-  --accent-primary: #00f5d4;
-  --accent-secondary: #ff4757;
-  --accent-glow: rgba(0, 245, 212, 0.4);
-
-  /* Text */
-  --text-primary: #e8eef5;
-  --text-muted: #8896a6;
-
   /* Touch targets */
   --touch-min: 72px;
   --radius-lg: 16px;
@@ -35,8 +22,8 @@ html, body, #root {
 }
 
 body {
-  background: var(--bg-primary);
-  color: var(--text-primary);
+  background: rgb(var(--bg-primary));
+  color: rgb(var(--text-primary));
   font-family: Inter, system-ui, 'Segoe UI', Roboto, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
@@ -57,7 +44,7 @@ body {
   }
 
   .ario-glow {
-    box-shadow: 0 0 40px rgba(0, 245, 212, 0.3);
+    box-shadow: 0 0 40px var(--accent-glow);
   }
 
   .ario-divider {

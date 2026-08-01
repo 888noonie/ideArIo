@@ -7,13 +7,15 @@ export default {
   theme: {
     extend: {
       colors: {
-        'ario-dark': '#0a0e14',
-        'ario-grey': '#131820',
-        'ario-card': '#1a2030',
-        'ario-turquoise': '#00f5d4',
-        'ario-red': '#ff4757',
-        'ario-text': '#e8eef5',
-        'ario-muted': '#8896a6',
+        // Theme-aware colors — channels live in src/styles/themes.css and
+        // switch via the `data-theme` attribute on <html>.
+        'ario-dark': 'rgb(var(--bg-primary) / <alpha-value>)',
+        'ario-grey': 'rgb(var(--bg-secondary) / <alpha-value>)',
+        'ario-card': 'rgb(var(--bg-card) / <alpha-value>)',
+        'ario-turquoise': 'rgb(var(--accent-primary) / <alpha-value>)',
+        'ario-red': 'rgb(var(--accent-secondary) / <alpha-value>)',
+        'ario-text': 'rgb(var(--text-primary) / <alpha-value>)',
+        'ario-muted': 'rgb(var(--text-muted) / <alpha-value>)',
       },
       fontFamily: {
         sans: ['Inter', 'system-ui', 'Segoe UI', 'Roboto', 'sans-serif'],
