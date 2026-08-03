@@ -6,13 +6,19 @@
   "display": "standalone",
   "background_color": "#0a0e14",
   "theme_color": "#00f5d4",
-  "orientation": "landscape",
+  "orientation": "any",
   "icons": [
     {
       "src": "/favicon.svg",
       "sizes": "any",
       "type": "image/svg+xml",
-      "purpose": "any maskable"
+      "purpose": "any"
+    },
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
     }
   ]
 }
