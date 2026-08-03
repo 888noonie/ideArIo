@@ -5,7 +5,8 @@ import { getProvider } from './providers';
 
 export interface ChatEntry {
   id: string;
-  role: 'user' | 'agent';
+  // 'system' = bridge/rate-limit notices (rendered centered/muted by UI).
+  role: 'user' | 'agent' | 'system';
   agentId?: string;
   agentName?: string;
   color?: string;
