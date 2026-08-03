@@ -2,13 +2,15 @@ interface StatusBarProps {
   online: boolean;
   synced: boolean;
   ideaCount: number;
+  /** Paired mode (car display slaved to the phone hub) — shows an amber badge. */
+  paired?: boolean;
 }
 
 /**
  * Slim status strip: online/sync state + idea count only.
  * Theme, model and debug controls live in the Settings tab.
  */
-export function StatusBar({ online, synced, ideaCount }: StatusBarProps) {
+export function StatusBar({ online, synced, ideaCount, paired }: StatusBarProps) {
   return (
     <div className="flex-none flex items-center justify-between px-4 py-1.5 bg-ario-card/30 border-b border-white/5 gap-4">
       <div className="flex items-center gap-4 min-w-0">
@@ -31,6 +33,15 @@ export function StatusBar({ online, synced, ideaCount }: StatusBarProps) {
             {synced ? 'Synced' : 'Unsaved changes'}
           </span>
         </div>
+
+        {paired && (
+          <span
+            className="flex-none px-2 py-0.5 rounded-md bg-amber-400/15 border border-amber-400/50
+                       text-amber-300 text-[10px] font-bold tracking-widest"
+          >
+            PAIRED
+          </span>
+        )}
       </div>
 
       <div className="text-ario-muted text-xs whitespace-nowrap">

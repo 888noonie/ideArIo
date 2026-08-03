@@ -1,5 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import type { ChatEntry } from '../lib/chat-engine';
+import { addToQueue, extractUrls } from '../lib/link-queue';
+import { LINK_QUEUE_CHANGED_EVENT } from './reflex-helpers';
 
 interface ChatBubbleProps {
   entry: ChatEntry;
@@ -7,6 +9,8 @@ interface ChatBubbleProps {
   modelLabel?: string;
   /** Re-send the prompt that produced a failed entry. */
   onRetry?: (entry: ChatEntry) => void;
+  /** Paired mode: URLs in agent replies become "Queue link" buttons. */
+  paired?: boolean;
 }
 
 function formatTime(ts: number): string {
@@ -24,8 +28,10 @@ function formatTime(ts: number): string {
  *   label above, timestamp below
  * - long messages collapse to ~4 lines with a fade and a "Tap to expand" toggle
  * - thinking = pulsing shimmer; error = warm red border + Retry
+ * - system: centered, muted, small, no border (bridge / rate-limit notices)
+ * - paired mode: URLs in agent replies render as "Queue link" buttons
  */
-export function ChatBubble({ entry, modelLabel, onRetry }: ChatBubbleProps) {
+export function ChatBubble({ entry, modelLabel, onRetry, paired }: ChatBubbleProps) {
   const [expanded, setExpanded] = useState(false);
   const [collapsible, setCollapsible] = useState(false);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -42,8 +48,23 @@ export function ChatBubble({ entry, modelLabel, onRetry }: ChatBubbleProps) {
     if (collapsible) setExpanded((prev) => !prev);
   }, [collapsible]);
 
+  const queueLink = useCallback((url: string) => {
+    addToQueue(url);
+    window.dispatchEvent(new Event(LINK_QUEUE_CHANGED_EVENT));
+  }, []);
+
   const isUser = entry.role === 'user';
   const time = formatTime(entry.ts);
+
+  // Bridge / rate-limit notices: centered, muted, small, no border.
+  if (entry.role === 'system') {
+    return (
+      <div className="px-8 py-1.5">
+        <p className="system-entry">{entry.content}</p>
+        <p className="text-ario-muted/50 text-[10px] mt-0.5 text-center">{time}</p>
+      </div>
+    );
+  }
 
   if (isUser) {
     return (
@@ -64,6 +85,7 @@ export function ChatBubble({ entry, modelLabel, onRetry }: ChatBubbleProps) {
   const accent = entry.color ?? '#00f5d4';
   const isThinking = entry.status === 'thinking';
   const isError = entry.status === 'error';
+  const urls = paired && !isThinking ? extractUrls(entry.content) : [];
 
   return (
     <div className="flex justify-start px-4 py-1.5">
@@ -106,6 +128,24 @@ export function ChatBubble({ entry, modelLabel, onRetry }: ChatBubbleProps) {
                 {entry.content}
               </p>
               {collapsible && !expanded && <div className="chat-fade" aria-hidden="true" />}
+            </div>
+          )}
+
+          {urls.length > 0 && (
+            <div className="mt-2 flex flex-col gap-2">
+              {urls.map((url) => (
+                <button
+                  key={url}
+                  type="button"
+                  onClick={() => queueLink(url)}
+                  className="min-h-14 px-4 rounded-2xl bg-amber-400/10 border border-amber-400/40
+                             text-amber-300 text-sm font-medium text-left break-all transition-colors
+                             hover:bg-amber-400/20 focus:outline-none focus:ring-2 focus:ring-amber-400/50"
+                  title={`Queue ${url} — open it later from the Bridge tab`}
+                >
+                  Queue link — {url}
+                </button>
+              ))}
             </div>
           )}
 

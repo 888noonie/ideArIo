@@ -148,3 +148,34 @@ body {
     scroll-behavior: auto;
   }
 }
+
+/* ---------------------------------------------------------------------------
+ * Bridge + paired mode (append-only — do not edit rules above).
+ * ------------------------------------------------------------------------- */
+
+/* System entries (bridge reconnect, reflex confirmations, rate-limit
+   notices): centered, muted, small, no border. */
+.system-entry {
+  text-align: center;
+  color: rgb(var(--text-muted) / 0.85);
+  font-size: 0.875rem;
+  line-height: 1.4;
+}
+
+/* Paired mode (car display slaved to the phone hub): enlarge the chat base
+   font for at-a-glance reading. */
+.paired-mode .chat-panel-root {
+  font-size: 1.15rem;
+}
+
+.paired-mode .chat-panel-root p,
+.paired-mode .chat-panel-root input,
+.paired-mode .chat-panel-root button {
+  font-size: 1.15rem;
+  line-height: 1.75rem;
+}
+
+.paired-mode .chat-panel-root .system-entry {
+  font-size: 1rem;
+  line-height: 1.5rem;
+}
