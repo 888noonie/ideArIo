@@ -3,6 +3,10 @@ import { VoicePanel, type InputMode } from './components/VoicePanel';
 import { IdeaCanvas } from './components/IdeaCanvas';
 import { StatusBar } from './components/StatusBar';
 import { DebugOverlay } from './components/DebugOverlay';
+import { TabBar, type TabId } from './components/TabBar';
+import { ChatPanel } from './components/ChatPanel';
+import { AgentManager } from './components/AgentManager';
+import { SettingsPanel } from './components/SettingsPanel';
 import { useSpeechRecognition } from './hooks/useSpeechRecognition';
 import { useSpeechSynthesis } from './hooks/useSpeechSynthesis';
 import { useWakeWord } from './hooks/useWakeWord';
@@ -15,6 +19,7 @@ import {
   saveSelectedModelId,
 } from './lib/model-registry';
 import { loadTheme, saveTheme, applyTheme, type Theme } from './lib/theme';
+import { loadAgents, saveAgents, DEFAULT_AGENTS, type AgentSpec } from './lib/agents';
 import type { ArioState, IdearioYAML, SavedIdeario } from './types/ideario';
 import type { ModelInfo } from './lib/model-registry';
 
@@ -33,6 +38,7 @@ function loadWakeMode(): boolean {
 }
 
 export default function App() {
+  const [activeTab, setActiveTab] = useState<TabId>('capture');
   const [arioState, setArioState] = useState<ArioState>('idle');
   const [ideario, setIdeario] = useState<IdearioYAML | null>(null);
   const [savedIdeas, setSavedIdeas] = useState<SavedIdeario[]>([]);
@@ -43,6 +49,7 @@ export default function App() {
   const [wakeMode, setWakeMode] = useState<boolean>(loadWakeMode);
   const [theme, setTheme] = useState<Theme>(loadTheme);
   const [showDebug, setShowDebug] = useState(false);
+  const [agents, setAgents] = useState<AgentSpec[]>(loadAgents);
 
   const {
     transcript,
@@ -335,6 +342,13 @@ export default function App() {
     setShowDebug((prev) => !prev);
   }, []);
 
+  const handleResetAgents = useCallback(() => {
+    const defaults = DEFAULT_AGENTS.map((a) => ({ ...a }));
+    saveAgents(defaults);
+    setAgents(defaults);
+    speak('Agents reset to defaults.', 'normal');
+  }, [speak]);
+
   // Apply persisted theme on mount (main.tsx also applies pre-paint).
   useEffect(() => {
     applyTheme(theme);
@@ -354,46 +368,69 @@ export default function App() {
   return (
     <div className="ario-shell bg-ario-dark overflow-hidden">
       <div className="h-full w-full flex flex-col bg-ario-dark rounded-2xl overflow-hidden border border-white/5 shadow-2xl">
-        {/* Top dust divider */}
-        <div className="ario-divider" />
-
-        {/* Main 8:3 content */}
-        <div className="flex-1 grid grid-cols-[30fr_70fr] gap-4 p-4 min-h-0">
-          <VoicePanel
-            state={arioState}
-            transcript={transcript}
-            interimTranscript={interimTranscript}
-            onActivate={handleActivate}
-            onSave={handleManualSave}
-            onClear={handleClear}
-            canSave={!!ideario}
-            inputMode={inputMode}
-            onInputModeChange={setInputMode}
-            onTextSubmit={handleTextSubmit}
-            speechSupported={speechSupported}
-            wakeMode={wakeMode}
-            wakePaused={wake.paused}
-            onToggleWakeMode={handleToggleWakeMode}
-            cueText={lastCue?.text ?? null}
-            ttsAvailable={ttsAvailable}
-          />
-
-          <div className="ario-panel min-h-0">
-            <IdeaCanvas ideario={ideario} />
-          </div>
-        </div>
-
-        {/* Status bar */}
+        {/* Slim status strip */}
         <StatusBar
           online={online}
           synced={allSynced && syncStatus === 'synced'}
           ideaCount={savedIdeas.length}
-          selectedModelId={selectedModelId}
-          onModelChange={handleModelChange}
-          theme={theme}
-          onToggleTheme={handleToggleTheme}
-          onToggleDebug={handleToggleDebug}
         />
+
+        {/* Active tab view — each tab owns the full content area */}
+        <main className="flex-1 min-h-0">
+          {activeTab === 'capture' && (
+            <div className="h-full p-4">
+              <VoicePanel
+                state={arioState}
+                transcript={transcript}
+                interimTranscript={interimTranscript}
+                onActivate={handleActivate}
+                onSave={handleManualSave}
+                onClear={handleClear}
+                canSave={!!ideario}
+                inputMode={inputMode}
+                onInputModeChange={setInputMode}
+                onTextSubmit={handleTextSubmit}
+                speechSupported={speechSupported}
+                wakeMode={wakeMode}
+                wakePaused={wake.paused}
+                onToggleWakeMode={handleToggleWakeMode}
+                cueText={lastCue?.text ?? null}
+                ttsAvailable={ttsAvailable}
+              />
+            </div>
+          )}
+
+          {activeTab === 'ideas' && (
+            <div className="h-full p-4">
+              <div className="ario-panel h-full min-h-0">
+                <IdeaCanvas ideario={ideario} />
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'chat' && (
+            <ChatPanel agents={agents} />
+          )}
+
+          {activeTab === 'agents' && (
+            <AgentManager agents={agents} onAgentsChange={setAgents} />
+          )}
+
+          {activeTab === 'settings' && (
+            <SettingsPanel
+              theme={theme}
+              onToggleTheme={handleToggleTheme}
+              showDebug={showDebug}
+              onToggleDebug={handleToggleDebug}
+              selectedModelId={selectedModelId}
+              onModelChange={handleModelChange}
+              onResetAgents={handleResetAgents}
+            />
+          )}
+        </main>
+
+        {/* Bottom tab bar */}
+        <TabBar activeTab={activeTab} onTabChange={setActiveTab} />
       </div>
 
       {showDebug && <DebugOverlay onClose={handleToggleDebug} />}
