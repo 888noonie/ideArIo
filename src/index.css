@@ -85,3 +85,66 @@ body {
 ::-webkit-scrollbar-thumb:hover {
   background: rgba(0, 245, 212, 0.4);
 }
+
+/* ---------------------------------------------------------------------------
+ * Tab shell + chat styles (append-only — do not edit rules above).
+ * ------------------------------------------------------------------------- */
+
+/* Smooth, momentum-friendly scrolling for chat and panel lists. */
+.chat-scroll {
+  -webkit-overflow-scrolling: touch;
+  scroll-behavior: smooth;
+  overscroll-behavior: contain;
+}
+
+/* Collapsed chat bubble: clamp to ~4 lines (line-height 1.625rem * 4). */
+.chat-collapsed {
+  max-height: 6.5rem;
+  overflow: hidden;
+}
+
+/* Fade at the bottom edge of a collapsed bubble. */
+.chat-fade {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 3rem;
+  pointer-events: none;
+  background: linear-gradient(
+    to bottom,
+    transparent,
+    rgb(var(--bg-secondary) / 0.95)
+  );
+}
+
+/* Thinking shimmer: soft pulsing gradient placeholder. */
+@keyframes chat-shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.chat-shimmer {
+  background: linear-gradient(
+    90deg,
+    rgb(var(--bg-card) / 0.6) 25%,
+    rgb(var(--accent-primary) / 0.25) 50%,
+    rgb(var(--bg-card) / 0.6) 75%
+  );
+  background-size: 200% 100%;
+  animation: chat-shimmer 1.4s linear infinite;
+}
+
+/* Respect reduced-motion for the shimmer and smooth scrolling. */
+@media (prefers-reduced-motion: reduce) {
+  .chat-shimmer {
+    animation: none;
+  }
+  .chat-scroll {
+    scroll-behavior: auto;
+  }
+}
