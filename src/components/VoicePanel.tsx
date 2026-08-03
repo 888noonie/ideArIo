@@ -44,7 +44,7 @@ export function VoicePanel({
   const displayText = interimTranscript || transcript;
 
   return (
-    <div className="ario-panel h-full flex flex-col p-6 overflow-y-auto">
+    <div className="ario-panel h-full flex flex-col p-6">
       {/* Top brand */}
       <div className="mb-6 flex items-start justify-between gap-3">
         <div>
