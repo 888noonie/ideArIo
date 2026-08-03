@@ -4,11 +4,22 @@
  * local Vite dev-server middleware (vite.config.ts).
  */
 
+export interface NimChatMessage {
+  role: 'system' | 'user' | 'assistant';
+  content: string;
+}
+
 export interface NimProxyBody {
   transcript: string;
   systemPrompt?: string;
   userPrompt?: string;
   model?: string;
+  /**
+   * OpenAI-style chat path (additive): when present, the proxy forwards these
+   * messages as a chat completion instead of running the legacy
+   * transcript/YAML flow.
+   */
+  messages?: NimChatMessage[];
 }
 
 export interface NimProxyResult {
@@ -90,6 +101,12 @@ export async function handleNimProxyRequest(
     return { status: 500, body: { error: 'NVIDIA_API_KEY not configured' } };
   }
 
+  // OpenAI-style chat passthrough (additive). Bodies without a `messages`
+  // array fall through to the legacy transcript/YAML flow unchanged below.
+  if (Array.isArray(body?.messages)) {
+    return handleChatCompletion(body.messages, body.model, apiKey);
+  }
+
   const { transcript, systemPrompt, userPrompt, model } = body ?? ({} as NimProxyBody);
 
   if (!transcript) {
@@ -113,6 +130,79 @@ export async function handleNimProxyRequest(
       if (!response.ok) {
         const errorText = await response.text();
         lastError = errorText;
+        continue;
+      }
+
+      const data = await response.json();
+      return { status: 200, body: data };
+    } catch (error) {
+      lastError = error instanceof Error ? error.message : 'Unknown error';
+      // Continue to next model fallback
+    }
+  }
+
+  return {
+    status: 504,
+    body: {
+      error: `All AI models failed. Last error: ${String(lastError).slice(0, 200)}`,
+      modelsTried: modelsToTry.length,
+    },
+  };
+}
+
+function callNIMChat(
+  apiKey: string,
+  messages: NimChatMessage[],
+  model: string
+): Promise<Response> {
+  return fetchWithTimeout(
+    NVIDIA_ENDPOINT,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model,
+        messages,
+        temperature: 0.7,
+        max_tokens: 2048,
+      }),
+    },
+    6000 // same per-attempt budget as the legacy path (Vercel 10s cap)
+  );
+}
+
+/**
+ * Chat-completion path: forwards an OpenAI-style messages array to NVIDIA,
+ * cycling the default model fallback list. Returns the upstream response
+ * verbatim, which has the shape `{ choices: [{ message: { content } }] }`.
+ */
+async function handleChatCompletion(
+  messages: NimChatMessage[],
+  model: string | undefined,
+  apiKey: string
+): Promise<NimProxyResult> {
+  const valid = messages.filter(
+    (m) => m && typeof m.role === 'string' && typeof m.content === 'string'
+  );
+  if (valid.length === 0) {
+    return { status: 400, body: { error: 'messages must be a non-empty array' } };
+  }
+
+  const modelsToTry = model
+    ? [model, ...DEFAULT_MODEL_CYCLE.filter((m) => m !== model)]
+    : DEFAULT_MODEL_CYCLE;
+
+  let lastError = 'Unknown error';
+
+  for (const modelName of modelsToTry) {
+    try {
+      const response = await callNIMChat(apiKey, valid, modelName);
+
+      if (!response.ok) {
+        lastError = await response.text();
         continue;
       }
 
