@@ -16,7 +16,8 @@ const TYPE_STYLES: Record<IdearioNode['type'], { label: string; className: strin
 
 /**
  * Modal card showing full information for a tapped graph node.
- * Rendered as an overlay inside the idea canvas panel.
+ * Rendered as a fixed overlay (bottom sheet on phones, centered modal on
+ * larger screens) so it never collides with the canvas or other tab content.
  */
 export function NodeDetail({ node, allNodes, ideaTitle, onClose }: NodeDetailProps) {
   const typeStyle = TYPE_STYLES[node.type] ?? TYPE_STYLES.concept;
@@ -31,14 +32,17 @@ export function NodeDetail({ node, allNodes, ideaTitle, onClose }: NodeDetailPro
 
   return (
     <div
-      className="absolute inset-0 z-20 flex items-center justify-center bg-black/60 p-4"
+      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 p-4"
+      style={{ paddingBottom: 'calc(1rem + env(safe-area-inset-bottom, 0px))' }}
       onClick={onClose}
+      onPointerDown={(e) => e.stopPropagation()}
       role="dialog"
       aria-modal="true"
       aria-label={`Node details: ${node.label}`}
     >
       <div
-        className="w-full max-w-md rounded-3xl bg-ario-grey border border-white/10 p-6
+        className="w-full max-w-md max-h-[85dvh] overflow-y-auto chat-scroll rounded-3xl
+                   bg-ario-grey border border-white/10 p-6
                    shadow-[0_0_60px_rgba(0,0,0,0.6)]"
         onClick={(e) => e.stopPropagation()}
       >
