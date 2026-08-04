@@ -6,6 +6,7 @@ import {
   loadChatLog,
   saveChatLog,
   dispatchToAgents,
+  CHAT_SYSTEM_ENTRY_EVENT,
   type ChatEntry,
 } from '../lib/chat-engine';
 import { tryReflex } from '../lib/reflex';
@@ -13,9 +14,6 @@ import { getBridgeSession } from '../lib/bridge/session';
 import type { BridgeRole } from '../lib/bridge/types';
 import { initCrewAudio, isCrewAudioEnabled, speakAgentReply } from '../lib/crew-audio';
 import { createReflexContext } from './reflex-helpers';
-
-/** Window event (detail: string) that appends a system entry to the chat log. */
-export const CHAT_SYSTEM_ENTRY_EVENT = 'ideario-chat-system-entry';
 
 const ACTIVE_AGENT_KEY = 'ideario-active-agent';
 
