@@ -6,8 +6,8 @@
  * - Navigation requests fall back to the cached shell when offline.
  */
 
-const SHELL_CACHE = 'ideario-shell-v3';
-const RUNTIME_CACHE = 'ideario-runtime-v3';
+const SHELL_CACHE = 'ideario-shell-v4';
+const RUNTIME_CACHE = 'ideario-runtime-v4';
 
 const SHELL_ASSETS = ['/', '/index.html', '/manifest.json', '/favicon.svg', '/icons.svg'];
 

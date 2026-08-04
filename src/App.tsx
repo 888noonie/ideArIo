@@ -5,6 +5,8 @@ import { StatusBar } from './components/StatusBar';
 import { DebugOverlay } from './components/DebugOverlay';
 import { TabBar, type TabId } from './components/TabBar';
 import { ChatPanel } from './components/ChatPanel';
+import { BridgeTab } from './components/BridgeTab';
+import { createReflexContext } from './components/reflex-helpers';
 import { AgentManager } from './components/AgentManager';
 import { SettingsPanel } from './components/SettingsPanel';
 import { useSpeechRecognition } from './hooks/useSpeechRecognition';
@@ -20,6 +22,8 @@ import {
 } from './lib/model-registry';
 import { loadTheme, saveTheme, applyTheme, type Theme } from './lib/theme';
 import { loadAgents, saveAgents, DEFAULT_AGENTS, type AgentSpec } from './lib/agents';
+import { tryReflex } from './lib/reflex';
+import { loadChatLog } from './lib/chat-engine';
 import type { ArioState, IdearioYAML, SavedIdeario } from './types/ideario';
 import type { ModelInfo } from './lib/model-registry';
 
@@ -28,10 +32,19 @@ function generateId(): string {
 }
 
 const WAKE_MODE_KEY = 'ideario-wake-mode';
+const PAIRED_KEY = 'ideario-paired';
 
 function loadWakeMode(): boolean {
   try {
     return localStorage.getItem(WAKE_MODE_KEY) === 'true';
+  } catch {
+    return false;
+  }
+}
+
+function loadPaired(): boolean {
+  try {
+    return localStorage.getItem(PAIRED_KEY) === 'true';
   } catch {
     return false;
   }
@@ -50,6 +63,20 @@ export default function App() {
   const [theme, setTheme] = useState<Theme>(loadTheme);
   const [showDebug, setShowDebug] = useState(false);
   const [agents, setAgents] = useState<AgentSpec[]>(loadAgents);
+  const [paired, setPaired] = useState<boolean>(loadPaired);
+
+  // Reflex context shared by the voice + typed capture paths — reads the
+  // persisted chat log so "save this" works from the Capture tab too.
+  const captureReflexCtxRef = useRef(createReflexContext(() => loadChatLog()));
+
+  // Persist paired mode (toggled from the Bridge tab).
+  useEffect(() => {
+    try {
+      localStorage.setItem(PAIRED_KEY, String(paired));
+    } catch {
+      // Ignore localStorage errors
+    }
+  }, [paired]);
 
   const {
     transcript,
@@ -177,6 +204,18 @@ export default function App() {
     cue('processing');
 
     try {
+      // Reflex lane FIRST — voice "save this" / "quiet" must work eyes-closed,
+      // skipping the YAML/NIM pipeline entirely.
+      const reflex = await tryReflex(finalTranscript, captureReflexCtxRef.current);
+      if (reflex.handled) {
+        if (reflex.response) {
+          speak(reflex.response, 'normal');
+        }
+        cue('saved');
+        setArioState('idle');
+        return;
+      }
+
       const rawYaml = await generateIdearioFromTranscript(finalTranscript, selectedModelId);
       const parsed = parseIdearioYaml(rawYaml, finalTranscript);
 
@@ -366,13 +405,14 @@ export default function App() {
   const allSynced = savedIdeas.length === 0 || savedIdeas.every((i) => i.synced);
 
   return (
-    <div className="ario-shell bg-ario-dark overflow-hidden">
+    <div className={`ario-shell bg-ario-dark overflow-hidden ${paired ? 'paired-mode' : ''}`}>
       <div className="h-full w-full flex flex-col bg-ario-dark rounded-2xl overflow-hidden border border-white/5 shadow-2xl">
         {/* Slim status strip */}
         <StatusBar
           online={online}
           synced={allSynced && syncStatus === 'synced'}
           ideaCount={savedIdeas.length}
+          paired={paired}
         />
 
         {/* Active tab view — each tab owns the full content area */}
@@ -409,7 +449,11 @@ export default function App() {
           )}
 
           {activeTab === 'chat' && (
-            <ChatPanel agents={agents} />
+            <ChatPanel agents={agents} paired={paired} />
+          )}
+
+          {activeTab === 'bridge' && (
+            <BridgeTab paired={paired} onPairedChange={setPaired} />
           )}
 
           {activeTab === 'agents' && (
