@@ -63,4 +63,8 @@ export const nimProvider: ChatProvider = {
   async listModels(): Promise<string[]> {
     return MODEL_REGISTRY.map((m) => m.id);
   },
+
+  async healthCheck(): Promise<{ ok: boolean; detail: string }> {
+    return { ok: false, detail: 'Health check not supported for NIM proxy' };
+  },
 };

@@ -108,4 +108,22 @@ export const openrouterProvider: ChatProvider = {
       .filter((id): id is string => Boolean(id));
     return ids.sort((a, b) => a.localeCompare(b));
   },
+
+  async healthCheck(): Promise<{ ok: boolean; detail: string }> {
+    const key = getApiKey('openrouter');
+    if (!key) {
+      return { ok: false, detail: 'No API key stored — add one in Settings' };
+    }
+    try {
+      const response = await fetch(MODELS_URL, {
+        headers: { Authorization: `Bearer ${key}` },
+      });
+      if (response.ok) {
+        return { ok: true, detail: 'OK 200' };
+      }
+      return { ok: false, detail: `HTTP ${response.status}` };
+    } catch {
+      return { ok: false, detail: 'Could not reach OpenRouter' };
+    }
+  },
 };

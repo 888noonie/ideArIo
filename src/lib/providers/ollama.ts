@@ -100,4 +100,18 @@ export const ollamaProvider: ChatProvider = {
       .filter((name): name is string => Boolean(name))
       .sort((a, b) => a.localeCompare(b));
   },
+
+  async healthCheck(): Promise<{ ok: boolean; detail: string }> {
+    const base = baseUrl();
+    let response: Response;
+    try {
+      response = await fetch(`${base}/api/tags`);
+    } catch {
+      return { ok: false, detail: `Could not connect to ${base}` };
+    }
+    if (response.ok) {
+      return { ok: true, detail: 'OK 200' };
+    }
+    return { ok: false, detail: `HTTP ${response.status}` };
+  },
 };

@@ -11,6 +11,11 @@ export interface ChatRequest {
   signal?: AbortSignal;
 }
 
+export interface HealthCheckResult {
+  ok: boolean;
+  detail: string;
+}
+
 export interface ChatProvider {
   id: ProviderId;
   label: string;
@@ -20,4 +25,6 @@ export interface ChatProvider {
   listModels(): Promise<string[]>;
   /** true when the provider has everything it needs (key present / reachable config) */
   isConfigured(): boolean;
+  /** Optional lightweight reachability probe (agent card signal-tower button). */
+  healthCheck?(): Promise<HealthCheckResult>;
 }
