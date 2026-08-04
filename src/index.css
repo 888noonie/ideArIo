@@ -179,3 +179,51 @@ body {
   font-size: 1rem;
   line-height: 1.5rem;
 }
+
+/* ---------------------------------------------------------------------------
+ * Roadtest fixes: AA viewport lock + paired-mode scroll stability
+ * (append-only — do not edit rules above).
+ * ------------------------------------------------------------------------- */
+
+/* Lock the shell to the load-time viewport height (--app-h is set ONCE on
+   load from window.innerHeight in App.tsx). The AA/Fermata WebView fires
+   resize jitter (virtual keyboard, browser chrome) that used to bounce the
+   whole layout; the shell now ignores it. */
+.ario-shell {
+  height: var(--app-h, 100vh);
+  height: var(--app-h, 100dvh);
+}
+
+/* Paired mode (car display): no overscroll chaining on the shell and no
+   smooth-scroll animation inside scroll regions — both read as viewport
+   "jumps" on the AA display. */
+.paired-mode {
+  overscroll-behavior: none;
+}
+
+.paired-mode .chat-scroll {
+  scroll-behavior: auto;
+}
+
+/* Collapsible expand animation (History tab day groups, Ideas tab jotted
+   notes). Disabled entirely under prefers-reduced-motion. */
+@keyframes history-expand-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.history-expand {
+  animation: history-expand-in 160ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .history-expand {
+    animation: none;
+  }
+}
