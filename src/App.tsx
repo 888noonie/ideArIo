@@ -5,7 +5,6 @@ import { TabBar, type TabId } from './components/TabBar';
 import { VoiceChatTab } from './components/VoiceChatTab';
 import { IdeasTab } from './components/IdeasTab';
 import { HistoryTab } from './components/HistoryTab';
-import { CHAT_SYSTEM_ENTRY_EVENT } from './components/ChatPanel';
 import { BridgeTab } from './components/BridgeTab';
 import { AgentManager } from './components/AgentManager';
 import { SettingsPanel } from './components/SettingsPanel';
@@ -22,7 +21,7 @@ import {
 } from './lib/model-registry';
 import { loadTheme, saveTheme, applyTheme, type Theme } from './lib/theme';
 import { loadAgents, saveAgents, DEFAULT_AGENTS, type AgentSpec } from './lib/agents';
-import { loadChatLog, saveChatLog } from './lib/chat-engine';
+import { CHAT_SYSTEM_ENTRY_EVENT } from './lib/chat-engine';
 import { initSettingsSyncListener, type SyncedSettings } from './lib/settings-sync';
 import type { ArioState, IdearioYAML, SavedIdeario } from './types/ideario';
 import type { ModelInfo } from './lib/model-registry';
@@ -171,21 +170,9 @@ export default function App() {
         saveSelectedModelId(s.selectedModelId);
         setSelectedModelId(s.selectedModelId);
       }
-      // Belt and braces: write straight to the log (survives even if the
-      // chat panel is mid-remount) AND ping the live panel via the window
-      // event so the entry renders immediately and persists through its
-      // normal save effect.
-      const log = loadChatLog();
-      saveChatLog([
-        ...log,
-        {
-          id: `chat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-          role: 'system',
-          content: 'Settings synced from hub',
-          status: 'done',
-          ts: Date.now(),
-        },
-      ]);
+      // Single write path: ping the always-mounted chat panel via the window
+      // event; it appends the entry and persists through its normal save
+      // effect. (A direct saveChatLog here raced that effect — F-07.)
       window.dispatchEvent(
         new CustomEvent(CHAT_SYSTEM_ENTRY_EVENT, { detail: 'Settings synced from hub' })
       );
