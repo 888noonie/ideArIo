@@ -1,6 +1,9 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import type { SpeechRecognitionHook, SpeechRecognitionOptions } from '../types/ideario';
 
+/** Upper bound on the accumulated final transcript (F-12). */
+const MAX_TRANSCRIPT_CHARS = 8000;
+
 // Extend Window interface for Web Speech API
 interface SpeechRecognitionEvent extends Event {
   results: SpeechRecognitionResultList;
@@ -129,7 +132,14 @@ export function useSpeechRecognition(options?: SpeechRecognitionOptions): Speech
       }
 
       if (final) {
-        setTranscript((prev) => (prev ? prev + ' ' + final : final));
+        // Cap accumulation (F-12): a long continuous session would otherwise
+        // grow the transcript string without bound. Keep the tail.
+        setTranscript((prev) => {
+          const next = prev ? prev + ' ' + final : final;
+          return next.length > MAX_TRANSCRIPT_CHARS
+            ? next.slice(-MAX_TRANSCRIPT_CHARS)
+            : next;
+        });
       }
       setInterimTranscript(interim);
       callbacksRef.current?.onResult?.(final, interim);

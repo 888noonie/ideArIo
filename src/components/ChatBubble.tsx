@@ -61,7 +61,7 @@ export function ChatBubble({ entry, modelLabel, onRetry, paired }: ChatBubblePro
     return (
       <div className="px-8 py-1.5">
         <p className="system-entry">{entry.content}</p>
-        <p className="text-ario-muted/50 text-[10px] mt-0.5 text-center">{time}</p>
+        <p className="text-ario-muted/50 text-xs mt-0.5 text-center">{time}</p>
       </div>
     );
   }
