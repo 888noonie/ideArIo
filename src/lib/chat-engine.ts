@@ -19,6 +19,9 @@ const STORAGE_KEY = 'ideario-chat-log';
 const MAX_ENTRIES = 200;
 const HISTORY_ENTRIES = 20;
 
+/** Window event (detail: string) that appends a system entry to the chat log. */
+export const CHAT_SYSTEM_ENTRY_EVENT = 'ideario-chat-system-entry';
+
 export function loadChatLog(): ChatEntry[] {
   let raw: string | null = null;
   try {
