@@ -1,35 +1,31 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { VoicePanel, type InputMode } from './components/VoicePanel';
-import { IdeaCanvas } from './components/IdeaCanvas';
 import { StatusBar } from './components/StatusBar';
 import { DebugOverlay } from './components/DebugOverlay';
 import { TabBar, type TabId } from './components/TabBar';
-import { ChatPanel } from './components/ChatPanel';
+import { VoiceChatTab } from './components/VoiceChatTab';
+import { IdeasTab } from './components/IdeasTab';
+import { HistoryTab } from './components/HistoryTab';
+import { CHAT_SYSTEM_ENTRY_EVENT } from './components/ChatPanel';
 import { BridgeTab } from './components/BridgeTab';
-import { createReflexContext } from './components/reflex-helpers';
 import { AgentManager } from './components/AgentManager';
 import { SettingsPanel } from './components/SettingsPanel';
 import { useSpeechRecognition } from './hooks/useSpeechRecognition';
 import { useSpeechSynthesis } from './hooks/useSpeechSynthesis';
 import { useWakeWord } from './hooks/useWakeWord';
-import { generateIdearioFromTranscript, describeProcessingError } from './lib/nim-proxy';
-import { parseIdearioYaml, serializeIdearioYaml } from './lib/yaml-builder';
+import { describeProcessingError } from './lib/nim-proxy';
+import { serializeIdearioYaml } from './lib/yaml-builder';
 import { saveIdearioToGist } from './lib/gist-client';
-import { saveToLocalDB, loadFromLocalDB, markAsSynced } from './lib/storage';
+import { loadFromLocalDB, markAsSynced } from './lib/storage';
 import {
   loadSelectedModelId,
   saveSelectedModelId,
 } from './lib/model-registry';
 import { loadTheme, saveTheme, applyTheme, type Theme } from './lib/theme';
 import { loadAgents, saveAgents, DEFAULT_AGENTS, type AgentSpec } from './lib/agents';
-import { tryReflex } from './lib/reflex';
-import { loadChatLog } from './lib/chat-engine';
+import { loadChatLog, saveChatLog } from './lib/chat-engine';
+import { initSettingsSyncListener, type SyncedSettings } from './lib/settings-sync';
 import type { ArioState, IdearioYAML, SavedIdeario } from './types/ideario';
 import type { ModelInfo } from './lib/model-registry';
-
-function generateId(): string {
-  return `idea-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-}
 
 const WAKE_MODE_KEY = 'ideario-wake-mode';
 const PAIRED_KEY = 'ideario-paired';
@@ -51,23 +47,26 @@ function loadPaired(): boolean {
 }
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<TabId>('capture');
+  const [activeTab, setActiveTab] = useState<TabId>('voice');
   const [arioState, setArioState] = useState<ArioState>('idle');
   const [ideario, setIdeario] = useState<IdearioYAML | null>(null);
   const [savedIdeas, setSavedIdeas] = useState<SavedIdeario[]>([]);
   const [online, setOnline] = useState(true);
   const [syncStatus, setSyncStatus] = useState<'synced' | 'pending'>('synced');
   const [selectedModelId, setSelectedModelId] = useState<string>(loadSelectedModelId);
-  const [inputMode, setInputMode] = useState<InputMode>('voice');
   const [wakeMode, setWakeMode] = useState<boolean>(loadWakeMode);
   const [theme, setTheme] = useState<Theme>(loadTheme);
   const [showDebug, setShowDebug] = useState(false);
   const [agents, setAgents] = useState<AgentSpec[]>(loadAgents);
   const [paired, setPaired] = useState<boolean>(loadPaired);
 
-  // Reflex context shared by the voice + typed capture paths — reads the
-  // persisted chat log so "save this" works from the Capture tab too.
-  const captureReflexCtxRef = useRef(createReflexContext(() => loadChatLog()));
+  // The Voice Chat tab registers ChatPanel's send path here; finalized
+  // voice transcripts flow through it (reflex lane FIRST, then dispatch)
+  // exactly as if typed.
+  const chatSendRef = useRef<((text: string) => Promise<void>) | null>(null);
+  const handleSendReady = useCallback((send: (text: string) => Promise<void>) => {
+    chatSendRef.current = send;
+  }, []);
 
   // Persist paired mode (toggled from the Bridge tab).
   useEffect(() => {
@@ -77,6 +76,13 @@ export default function App() {
       // Ignore localStorage errors
     }
   }, [paired]);
+
+  // Lock the shell height ONCE on load: the AA WebView fires viewport
+  // resize jitter (keyboard, browser chrome) that used to bounce the
+  // layout. --app-h is intentionally NOT updated on resize/orientation.
+  useEffect(() => {
+    document.documentElement.style.setProperty('--app-h', `${window.innerHeight}px`);
+  }, []);
 
   const {
     transcript,
@@ -94,10 +100,9 @@ export default function App() {
   const { cue, speak, lastCue, ttsAvailable } = useSpeechSynthesis();
   const processingRef = useRef(false);
 
-  // Fall back to text input when the Web Speech API is unavailable.
+  // Wake mode can't run without speech recognition.
   useEffect(() => {
     if (!speechSupported) {
-      setInputMode('text');
       setWakeMode(false);
     }
   }, [speechSupported]);
@@ -117,12 +122,12 @@ export default function App() {
   const processCommandRef = useRef<(text: string) => void>(() => {});
 
   const wake = useWakeWord({
-    enabled: wakeMode && speechSupported && inputMode === 'voice',
+    enabled: wakeMode && speechSupported,
     onCommand: useCallback((text: string) => {
       processCommandRef.current(text);
     }, []),
     onAutoPause: useCallback(() => {
-      speak('Wake mode paused after silence. Tap the orb to resume.', 'normal');
+      speak('Wake mode paused after silence. Tap the mic to resume.', 'normal');
     }, [speak]),
     onDisabled: useCallback((reason: string) => {
       setWakeMode(false);
@@ -136,6 +141,55 @@ export default function App() {
     loadFromLocalDB()
       .then((ideas) => setSavedIdeas(ideas))
       .catch(() => setSavedIdeas([]));
+  }, []);
+
+  // Settings sync (F2/A4): display role applies hub-pushed settings to
+  // React state AND the existing localStorage keys, then appends a system
+  // chat entry. Display never echoes settings back.
+  useEffect(() => {
+    initSettingsSyncListener((s: SyncedSettings) => {
+      try {
+        for (const [providerId, key] of Object.entries(s.providerKeys ?? {})) {
+          localStorage.setItem(`ideario-key-${providerId}`, key);
+        }
+        if (typeof s.ollamaBaseUrl === 'string') {
+          localStorage.setItem('ideario-ollama-url', s.ollamaBaseUrl);
+        }
+      } catch {
+        // Ignore localStorage errors
+      }
+      if (Array.isArray(s.agents) && s.agents.length > 0) {
+        saveAgents(s.agents);
+        setAgents(s.agents);
+      }
+      if (s.theme === 'light' || s.theme === 'dark') {
+        applyTheme(s.theme);
+        saveTheme(s.theme);
+        setTheme(s.theme);
+      }
+      if (typeof s.selectedModelId === 'string' && s.selectedModelId) {
+        saveSelectedModelId(s.selectedModelId);
+        setSelectedModelId(s.selectedModelId);
+      }
+      // Belt and braces: write straight to the log (survives even if the
+      // chat panel is mid-remount) AND ping the live panel via the window
+      // event so the entry renders immediately and persists through its
+      // normal save effect.
+      const log = loadChatLog();
+      saveChatLog([
+        ...log,
+        {
+          id: `chat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          role: 'system',
+          content: 'Settings synced from hub',
+          status: 'done',
+          ts: Date.now(),
+        },
+      ]);
+      window.dispatchEvent(
+        new CustomEvent(CHAT_SYSTEM_ENTRY_EVENT, { detail: 'Settings synced from hub' })
+      );
+    });
   }, []);
 
   // Online/offline detection
@@ -163,17 +217,17 @@ export default function App() {
   // Sync state when listening stops with a transcript
   useEffect(() => {
     if (!isListening && transcript && !processingRef.current) {
-      handleSpeechFinalized(transcript, 'voice');
+      handleSpeechFinalized(transcript);
     }
   }, [isListening, transcript]);
 
   // Mobile fix: if recognition ends with NO transcript and NO error
-  // (silence, mobile speech-service hiccup), never leave the orb stuck
+  // (silence, mobile speech-service hiccup), never leave the mic stuck
   // in "listening" — reset to idle. The reset must only fire on a genuine
   // listening→ended transition: `startListening()` is async, so there is a
   // start-up window between the tap (state set to 'listening') and the
   // recognition `onstart` where `isListening` is still false. Tracking
-  // `wasListeningRef` keeps the orb in 'listening' through that window.
+  // `wasListeningRef` keeps the mic in 'listening' through that window.
   const wasListeningRef = useRef(false);
   useEffect(() => {
     if (isListening) {
@@ -192,11 +246,11 @@ export default function App() {
     if (noSpeech) {
       clearNoSpeech();
       setArioState((prev) => (prev === 'thinking' ? prev : 'idle'));
-      speak("I didn't hear anything — tap and try again, or use Type instead.", 'critical');
+      speak("I didn't hear anything — tap and try again, or type instead.", 'critical');
     }
   }, [noSpeech, clearNoSpeech, speak]);
 
-  const handleSpeechFinalized = useCallback(async (finalTranscript: string, source: 'voice' | 'manual') => {
+  const handleSpeechFinalized = useCallback(async (finalTranscript: string) => {
     if (!finalTranscript.trim()) return;
 
     processingRef.current = true;
@@ -204,31 +258,21 @@ export default function App() {
     cue('processing');
 
     try {
-      // Reflex lane FIRST — voice "save this" / "quiet" must work eyes-closed,
-      // skipping the YAML/NIM pipeline entirely.
-      const reflex = await tryReflex(finalTranscript, captureReflexCtxRef.current);
-      if (reflex.handled) {
-        if (reflex.response) {
-          speak(reflex.response, 'normal');
-        }
-        cue('saved');
+      const send = chatSendRef.current;
+      if (!send) {
+        // VoiceChatTab stays mounted, so this should never happen — log
+        // instead of faking success.
+        console.warn('Voice Chat send path not registered; transcript dropped.');
         setArioState('idle');
         return;
       }
-
-      const rawYaml = await generateIdearioFromTranscript(finalTranscript, selectedModelId);
-      const parsed = parseIdearioYaml(rawYaml, finalTranscript);
-
-      if (!parsed) {
-        throw new Error('Could not parse idea');
-      }
-
-      setIdeario(parsed);
-      await handleSave(parsed, source);
+      // Reflex lane runs FIRST inside ChatPanel's send path, then the
+      // transcript dispatches to the agents exactly as if typed.
+      await send(finalTranscript);
       cue('saved');
       setArioState('idle');
     } catch (error) {
-      console.error('Ideario processing failed:', error);
+      console.error('Voice dispatch failed:', error);
       cue('error');
       setArioState('error');
       speak(describeProcessingError(error), 'critical');
@@ -241,20 +285,20 @@ export default function App() {
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cue, resetTranscript, selectedModelId, speak]);
+  }, [cue, resetTranscript, speak]);
 
   // Keep the wake-word command handler pointing at the latest
   // handleSpeechFinalized — assigned in an effect, not during render.
   useEffect(() => {
     processCommandRef.current = (text: string) => {
-      handleSpeechFinalized(text, 'voice');
+      void handleSpeechFinalized(text);
     };
   }, [handleSpeechFinalized]);
 
   const handleActivate = useCallback(() => {
     if (arioState === 'thinking') return;
 
-    // In wake mode the orb toggles wake pause/resume instead of a
+    // In wake mode the mic toggles wake pause/resume instead of a
     // one-shot recording session.
     if (wakeMode) {
       if (wake.paused) {
@@ -262,7 +306,7 @@ export default function App() {
         cue('wake');
       } else {
         wake.pause();
-        speak('Wake mode paused. Tap the orb to resume.', 'normal');
+        speak('Wake mode paused. Tap the mic to resume.', 'normal');
       }
       return;
     }
@@ -270,7 +314,6 @@ export default function App() {
     if (isListening) {
       stopListening();
     } else {
-      setIdeario(null);
       resetTranscript();
       setArioState('listening');
       cue('listening');
@@ -282,7 +325,6 @@ export default function App() {
     setWakeMode((prev) => {
       const next = !prev;
       if (next) {
-        setIdeario(null);
         resetTranscript();
         setArioState('idle');
         cue('wake');
@@ -293,42 +335,6 @@ export default function App() {
       return next;
     });
   }, [cue, resetTranscript, speak]);
-
-  const handleTextSubmit = useCallback((text: string) => {
-    handleSpeechFinalized(text, 'manual');
-  }, [handleSpeechFinalized]);
-
-  const handleSave = useCallback(async (ideaToSave: IdearioYAML, source: 'voice' | 'manual') => {
-    const id = generateId();
-    const yamlString = serializeIdearioYaml(ideaToSave);
-
-    const saved: SavedIdeario = {
-      ...ideaToSave,
-      id,
-      gist_id: undefined,
-      synced: false,
-      source,
-    };
-
-    await saveToLocalDB(saved);
-    setSavedIdeas((prev) => [saved, ...prev]);
-    setSyncStatus('pending');
-
-    if (navigator.onLine && import.meta.env.VITE_GITHUB_TOKEN) {
-      try {
-        const { gist_id } = await saveIdearioToGist(saved, yamlString);
-        await markAsSynced(id, gist_id);
-        saved.gist_id = gist_id;
-        saved.synced = true;
-        setSavedIdeas((prev) => prev.map((i) => (i.id === id ? saved : i)));
-        setSyncStatus('synced');
-        cue('synced');
-      } catch (error) {
-        console.warn('Gist sync failed:', error);
-        setSyncStatus('pending');
-      }
-    }
-  }, [cue]);
 
   const syncPendingIdeas = useCallback(async () => {
     const pending = savedIdeas.filter((i) => !i.synced);
@@ -349,18 +355,6 @@ export default function App() {
     setSavedIdeas([...savedIdeas]);
     setSyncStatus('synced');
   }, [savedIdeas]);
-
-  const handleManualSave = useCallback(() => {
-    if (ideario) {
-      handleSave(ideario, inputMode === 'text' ? 'manual' : 'voice');
-    }
-  }, [ideario, handleSave, inputMode]);
-
-  const handleClear = useCallback(() => {
-    setIdeario(null);
-    resetTranscript();
-    setArioState('idle');
-  }, [resetTranscript]);
 
   const handleModelChange = useCallback((model: ModelInfo) => {
     setSelectedModelId(model.id);
@@ -388,12 +382,20 @@ export default function App() {
     speak('Agents reset to defaults.', 'normal');
   }, [speak]);
 
+  const handleOpenIdea = useCallback((idea: SavedIdeario) => {
+    setIdeario(idea);
+  }, []);
+
+  const handleReflexResponse = useCallback((text: string) => {
+    speak(text, 'normal');
+  }, [speak]);
+
   // Apply persisted theme on mount (main.tsx also applies pre-paint).
   useEffect(() => {
     applyTheme(theme);
   }, [theme]);
 
-  // Handle speech errors (unsupported browsers degrade to text input
+  // Handle speech errors (unsupported browsers degrade to typed chat
   // instead of nagging the user on load).
   useEffect(() => {
     if (speechError && speechSupported) {
@@ -417,47 +419,43 @@ export default function App() {
 
         {/* Active tab view — each tab owns the full content area */}
         <main className="flex-1 min-h-0">
-          {activeTab === 'capture' && (
-            <div className="h-full p-4">
-              <VoicePanel
-                state={arioState}
-                transcript={transcript}
-                interimTranscript={interimTranscript}
-                onActivate={handleActivate}
-                onSave={handleManualSave}
-                onClear={handleClear}
-                canSave={!!ideario}
-                inputMode={inputMode}
-                onInputModeChange={setInputMode}
-                onTextSubmit={handleTextSubmit}
-                speechSupported={speechSupported}
-                wakeMode={wakeMode}
-                wakePaused={wake.paused}
-                onToggleWakeMode={handleToggleWakeMode}
-                cueText={lastCue?.text ?? null}
-                ttsAvailable={ttsAvailable}
-              />
-            </div>
-          )}
+          {/* Voice Chat stays mounted (hidden when another tab is active)
+              so the voice/wake-word send path and bridge subscriptions
+              never drop mid-session. */}
+          <div className={activeTab === 'voice' ? 'h-full min-h-0' : 'hidden'}>
+            <VoiceChatTab
+              agents={agents}
+              paired={paired}
+              visible={activeTab === 'voice'}
+              state={arioState}
+              transcript={transcript}
+              interimTranscript={interimTranscript}
+              onActivate={handleActivate}
+              speechSupported={speechSupported}
+              wakeMode={wakeMode}
+              wakePaused={wake.paused}
+              onToggleWakeMode={handleToggleWakeMode}
+              cueText={lastCue?.text ?? null}
+              ttsAvailable={ttsAvailable}
+              onReflexResponse={handleReflexResponse}
+              onSendReady={handleSendReady}
+            />
+          </div>
 
           {activeTab === 'ideas' && (
-            <div className="h-full p-4">
-              <div className="ario-panel h-full min-h-0">
-                <IdeaCanvas ideario={ideario} />
-              </div>
-            </div>
+            <IdeasTab ideario={ideario} savedIdeas={savedIdeas} onOpenIdea={handleOpenIdea} />
           )}
 
-          {activeTab === 'chat' && (
-            <ChatPanel agents={agents} paired={paired} />
+          {activeTab === 'agents' && (
+            <AgentManager agents={agents} onAgentsChange={setAgents} />
           )}
 
           {activeTab === 'bridge' && (
             <BridgeTab paired={paired} onPairedChange={setPaired} />
           )}
 
-          {activeTab === 'agents' && (
-            <AgentManager agents={agents} onAgentsChange={setAgents} />
+          {activeTab === 'history' && (
+            <HistoryTab savedIdeas={savedIdeas} />
           )}
 
           {activeTab === 'settings' && (
