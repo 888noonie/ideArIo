@@ -46,6 +46,11 @@ export function BridgeTab({ paired, onPairedChange }: BridgeTabProps) {
   const session = getBridgeSession();
   const [status, setStatus] = useState<BridgeStatus>(() => session.getStatus());
   const [roleChoice, setRoleChoice] = useState<RoleChoice>(() => session.getStatus().role ?? 'off');
+  // F5 uncontrolled pattern: the Fermata virtual keyboard does not reliably
+  // drive controlled React inputs, so the code input owns its own value
+  // (defaultValue + ref). joinCode only mirrors it (via onInput) for the
+  // Join button's validation display — the real value is read from the ref.
+  const joinInputRef = useRef<HTMLInputElement>(null);
   const [joinCode, setJoinCode] = useState('');
   const [starting, setStarting] = useState(false);
   const [startError, setStartError] = useState<string | null>(null);
@@ -102,7 +107,8 @@ export function BridgeTab({ paired, onPairedChange }: BridgeTabProps) {
   }, []);
 
   const handleJoin = useCallback(async () => {
-    const code = joinCode.trim();
+    // Read + sanitize from the DOM ref on submit (not per-keystroke state).
+    const code = (joinInputRef.current?.value ?? '').replace(/\D/g, '');
     if (!/^\d{6}$/.test(code)) {
       setStartError('Enter the 6-digit code shown on the phone hub.');
       return;
@@ -116,11 +122,12 @@ export function BridgeTab({ paired, onPairedChange }: BridgeTabProps) {
     } finally {
       setStarting(false);
     }
-  }, [joinCode]);
+  }, []);
 
   const handleStop = useCallback(() => {
     sessionRef.current.stop();
     setRoleChoice('off');
+    if (joinInputRef.current) joinInputRef.current.value = '';
     setJoinCode('');
     setStartError(null);
   }, []);
@@ -150,7 +157,7 @@ export function BridgeTab({ paired, onPairedChange }: BridgeTabProps) {
   const active = status.role !== null;
 
   return (
-    <div className="h-full overflow-y-auto chat-scroll px-4 py-4 space-y-4">
+    <div className="h-full min-h-0 overflow-y-auto chat-scroll overscroll-contain px-4 py-4 space-y-4">
       {/* Role picker */}
       <section className="ario-panel p-4" aria-label="Bridge role">
         <h2 className="text-ario-text text-lg font-semibold mb-1">Bridge</h2>
@@ -199,11 +206,12 @@ export function BridgeTab({ paired, onPairedChange }: BridgeTabProps) {
         {roleChoice === 'display' && !active && (
           <div className="mt-3 flex items-center gap-3">
             <input
+              ref={joinInputRef}
               type="text"
               inputMode="numeric"
               maxLength={6}
-              value={joinCode}
-              onChange={(e) => setJoinCode(e.target.value.replace(/\D/g, ''))}
+              defaultValue=""
+              onInput={(e) => setJoinCode(e.currentTarget.value.replace(/\D/g, ''))}
               placeholder="6-digit code"
               aria-label="6-digit pairing code"
               className="flex-1 min-h-14 px-5 rounded-2xl bg-ario-card text-ario-text text-xl tracking-[0.4em]
