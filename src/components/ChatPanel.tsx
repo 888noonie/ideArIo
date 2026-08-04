@@ -8,9 +8,16 @@ import {
   dispatchToAgents,
   type ChatEntry,
 } from '../lib/chat-engine';
+import { tryReflex } from '../lib/reflex';
+import { getBridgeSession } from '../lib/bridge/session';
+import type { BridgeRole } from '../lib/bridge/types';
+import { initCrewAudio, isCrewAudioEnabled, speakAgentReply } from '../lib/crew-audio';
+import { createReflexContext } from './reflex-helpers';
 
 interface ChatPanelProps {
   agents: AgentSpec[];
+  /** Paired mode: URLs in agent bubbles render as "Queue link" buttons. */
+  paired?: boolean;
 }
 
 function createEntryId(): string {
@@ -22,7 +29,7 @@ function createEntryId(): string {
  * "Hey everyone, ...") via routePrompt + dispatchToAgents; quick-tap chips
  * inject the wake-word prefix; no wake word -> the active agent chip.
  */
-export function ChatPanel({ agents }: ChatPanelProps) {
+export function ChatPanel({ agents, paired }: ChatPanelProps) {
   const [entries, setEntries] = useState<ChatEntry[]>(loadChatLog);
   const [input, setInput] = useState('');
   const [activeAgentId, setActiveAgentId] = useState<string | null>(agents[0]?.id ?? null);
@@ -30,6 +37,25 @@ export function ChatPanel({ agents }: ChatPanelProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const entriesRef = useRef(entries);
   entriesRef.current = entries;
+
+  // ----- Bridge + reflex wiring -----
+  const sessionRef = useRef(getBridgeSession());
+  const [bridgeRole, setBridgeRole] = useState<BridgeRole | null>(
+    () => sessionRef.current.getStatus().role
+  );
+  const bridgeRoleRef = useRef(bridgeRole);
+  const reflexCtxRef = useRef(createReflexContext(() => entriesRef.current));
+  const prevConnectedRef = useRef(sessionRef.current.getStatus().connected);
+  const seenEnvelopesRef = useRef<Set<string>>(new Set());
+  const spokenEntriesRef = useRef<Set<string>>(new Set());
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   // Keep the active agent valid when the agent list changes.
   useEffect(() => {
@@ -65,7 +91,34 @@ export function ChatPanel({ agents }: ChatPanelProps) {
     });
   }, []);
 
-  const send = useCallback(async (rawText: string) => {
+  const appendSystemEntry = useCallback((content: string) => {
+    if (!mountedRef.current) return;
+    const sysEntry: ChatEntry = {
+      id: createEntryId(),
+      role: 'system',
+      content,
+      status: 'done',
+      ts: Date.now(),
+    };
+    setEntries((prev) => [...prev, sysEntry]);
+  }, []);
+
+  // Replace-by-id merge for incoming 'entries' envelopes (display role),
+  // kept in ts order.
+  const mergeRemoteEntries = useCallback((incoming: ChatEntry[]) => {
+    if (!mountedRef.current) return;
+    setEntries((prev) => {
+      const byId = new Map(prev.map((e) => [e.id, e] as const));
+      for (const e of incoming) {
+        if (e && typeof e.id === 'string') byId.set(e.id, e);
+      }
+      return [...byId.values()].sort((a, b) => a.ts - b.ts);
+    });
+  }, []);
+
+  // Local dispatch — current (bridge-off) behavior, also used by the hub to
+  // run prompts forwarded by the display.
+  const dispatchLocal = useCallback(async (rawText: string) => {
     const text = rawText.trim();
     if (!text || sending || agents.length === 0) return;
 
@@ -89,6 +142,99 @@ export function ChatPanel({ agents }: ChatPanelProps) {
       setSending(false);
     }
   }, [agents, activeAgentId, sending, applyUpdate]);
+
+  const dispatchLocalRef = useRef(dispatchLocal);
+  useEffect(() => {
+    dispatchLocalRef.current = dispatchLocal;
+  }, [dispatchLocal]);
+
+  // Bridge session subscriptions: live status (reconnect notice) + envelopes
+  // (display merges 'entries'; hub runs forwarded 'chat-input').
+  useEffect(() => {
+    initCrewAudio();
+    const session = sessionRef.current;
+    session.onStatus((status) => {
+      const wasConnected = prevConnectedRef.current;
+      prevConnectedRef.current = status.connected;
+      bridgeRoleRef.current = status.role;
+      setBridgeRole(status.role);
+      if (!wasConnected && status.connected) {
+        const lastUser = [...entriesRef.current].reverse().find((e) => e.role === 'user');
+        const thread = lastUser ? lastUser.content.slice(0, 60) : 'none yet';
+        appendSystemEntry(`Welcome back — last thread: ${thread}`);
+      }
+    });
+    session.onMessage((env) => {
+      if (seenEnvelopesRef.current.has(env.id)) return;
+      seenEnvelopesRef.current.add(env.id);
+      if (seenEnvelopesRef.current.size > 500) {
+        seenEnvelopesRef.current = new Set([...seenEnvelopesRef.current].slice(-250));
+      }
+      const role = bridgeRoleRef.current;
+      if (role === 'display' && env.type === 'entries' && Array.isArray(env.payload)) {
+        mergeRemoteEntries(env.payload as ChatEntry[]);
+      } else if (role === 'hub' && env.type === 'chat-input' && mountedRef.current) {
+        const text = (env.payload as { text?: unknown } | null)?.text;
+        if (typeof text === 'string' && text.trim()) {
+          void dispatchLocalRef.current(text);
+        }
+      }
+    });
+  }, [appendSystemEntry, mergeRemoteEntries]);
+
+  // Hub role: broadcast the log (last 50) on every entries change.
+  useEffect(() => {
+    if (bridgeRole === 'hub') {
+      sessionRef.current.send('entries', entries.slice(-50));
+    }
+  }, [entries, bridgeRole]);
+
+  // Crew audio: speak each agent reply once when it completes.
+  useEffect(() => {
+    for (const entry of entries) {
+      if (entry.role === 'agent' && entry.status === 'done' && !spokenEntriesRef.current.has(entry.id)) {
+        spokenEntriesRef.current.add(entry.id);
+        if (isCrewAudioEnabled()) {
+          speakAgentReply(entry.content);
+        }
+      }
+    }
+  }, [entries]);
+
+  const send = useCallback(async (rawText: string) => {
+    const text = rawText.trim();
+    if (!text) return;
+
+    // (a) Reflex lane FIRST — instant local handling, no LLM dispatch.
+    try {
+      const reflex = await tryReflex(text, reflexCtxRef.current);
+      if (reflex.handled) {
+        const userEntry: ChatEntry = {
+          id: createEntryId(),
+          role: 'user',
+          content: text,
+          status: 'done',
+          ts: Date.now(),
+        };
+        setEntries((prev) => [...prev, userEntry]);
+        appendSystemEntry(reflex.response ?? 'Done.');
+        setInput('');
+        return;
+      }
+    } catch (error) {
+      console.warn('Reflex lane failed, falling through to dispatch:', error);
+    }
+
+    // (c) Display role: forward to the phone hub; replies arrive as 'entries'
+    // envelopes and are merged by id.
+    if (bridgeRoleRef.current === 'display') {
+      sessionRef.current.send('chat-input', { text });
+      setInput('');
+      return;
+    }
+
+    await dispatchLocal(text);
+  }, [dispatchLocal, appendSystemEntry]);
 
   const handleSubmit = useCallback((e: FormEvent) => {
     e.preventDefault();
@@ -128,7 +274,7 @@ export function ChatPanel({ agents }: ChatPanelProps) {
   }, [agents]);
 
   return (
-    <div className="h-full flex flex-col min-h-0">
+    <div className="chat-panel-root h-full flex flex-col min-h-0">
       {/* Message list */}
       <div
         ref={scrollRef}
@@ -154,6 +300,7 @@ export function ChatPanel({ agents }: ChatPanelProps) {
               entry={entry}
               modelLabel={modelLabelFor(entry)}
               onRetry={handleRetry}
+              paired={paired}
             />
           ))
         )}
