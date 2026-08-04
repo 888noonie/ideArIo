@@ -75,7 +75,7 @@ export function VoicePanel({
             {!ttsAvailable && (
               <span className="text-ario-muted">(silent mode) </span>
             )}
-            {cueText ?? 'Voice feedback unavailable in this browser — watch here for responses.'}
+            {cueText ?? 'Voice feedback is quiet in this browser. Pair your phone in the Bridge tab and enable Crew audio there for spoken replies.'}
           </p>
         </div>
       )}

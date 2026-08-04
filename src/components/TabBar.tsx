@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 
-export type TabId = 'capture' | 'ideas' | 'chat' | 'agents' | 'bridge' | 'settings';
+export type TabId = 'voice' | 'ideas' | 'agents' | 'bridge' | 'history' | 'settings';
 
 interface TabBarProps {
   activeTab: TabId;
@@ -22,8 +22,8 @@ const strokeProps = {
 
 const TABS: TabDef[] = [
   {
-    id: 'capture',
-    label: 'Capture',
+    id: 'voice',
+    label: 'Voice',
     icon: () => (
       <svg className="w-7 h-7" {...strokeProps}>
         <path
@@ -43,19 +43,6 @@ const TABS: TabDef[] = [
           strokeLinecap="round"
           strokeLinejoin="round"
           d="M12 18v-5.25m0 0a6.01 6.01 0 001.5-.189m-1.5.189a6.01 6.01 0 01-1.5-.189m3.75 7.478a12.06 12.06 0 01-4.5 0m3.75 2.383a14.406 14.406 0 01-3 0M14.25 18v-.192c0-.983.658-1.823 1.508-2.316a7.5 7.5 0 10-7.517 0c.85.493 1.509 1.333 1.509 2.316V18"
-        />
-      </svg>
-    ),
-  },
-  {
-    id: 'chat',
-    label: 'Chat',
-    icon: () => (
-      <svg className="w-7 h-7" {...strokeProps}>
-        <path
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          d="M8.625 12a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H8.25m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H12m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0h-.375M21 12c0 4.556-4.03 8.25-9 8.25a9.764 9.764 0 01-2.555-.337A5.972 5.972 0 015.41 20.97a5.969 5.969 0 01-.474-.065 4.48 4.48 0 00.978-2.025c.09-.457-.133-.901-.467-1.226C3.93 16.178 3 14.189 3 12c0-4.556 4.03-8.25 9-8.25s9 3.694 9 8.25z"
         />
       </svg>
     ),
@@ -87,6 +74,19 @@ const TABS: TabDef[] = [
           strokeLinecap="round"
           strokeLinejoin="round"
           d="M8.25 15.75a5.25 5.25 0 017.5 0M5.25 12.75a9.75 9.75 0 0113.5 0M2.25 9.75a14.25 14.25 0 0119.5 0"
+        />
+      </svg>
+    ),
+  },
+  {
+    id: 'history',
+    label: 'History',
+    icon: () => (
+      <svg className="w-7 h-7" {...strokeProps}>
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z"
         />
       </svg>
     ),
