@@ -150,6 +150,9 @@ export function BridgeTab({ paired, onPairedChange }: BridgeTabProps) {
   }, []);
 
   const handleOpenLink = useCallback((url: string) => {
+    // Scheme allowlist: only web URLs may be opened (blocks javascript:,
+    // data:, file: etc. if a malformed payload ever enters the queue).
+    if (!/^https?:\/\//i.test(url)) return;
     window.open(url, '_blank', 'noopener,noreferrer');
   }, []);
 
