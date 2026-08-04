@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef, type FormEvent } from 'react';
+import { useState, useEffect, useCallback, useRef, type ChangeEvent, type FormEvent } from 'react';
 import { ChatBubble } from './ChatBubble';
 import type { AgentSpec } from '../lib/agents';
 import { routePrompt, type RoutedPrompt } from '../lib/wake-router';
@@ -14,14 +14,44 @@ import type { BridgeRole } from '../lib/bridge/types';
 import { initCrewAudio, isCrewAudioEnabled, speakAgentReply } from '../lib/crew-audio';
 import { createReflexContext } from './reflex-helpers';
 
+/** Window event (detail: string) that appends a system entry to the chat log. */
+export const CHAT_SYSTEM_ENTRY_EVENT = 'ideario-chat-system-entry';
+
+const ACTIVE_AGENT_KEY = 'ideario-active-agent';
+
 interface ChatPanelProps {
   agents: AgentSpec[];
   /** Paired mode: URLs in agent bubbles render as "Queue link" buttons. */
   paired?: boolean;
+  /**
+   * Registration point for the Voice Chat tab: hands back a function that
+   * pushes text through the normal send path (reflex lane FIRST, then
+   * dispatch/forward) as if it had been typed.
+   */
+  onSendReady?: (send: (text: string) => Promise<void>) => void;
+  /** Called with the reflex confirmation so the voice lane can speak it. */
+  onReflexResponse?: (text: string) => void;
+  /**
+   * False while the Voice Chat tab is hidden (kept mounted). Used to
+   * re-snap the scroll position when the tab becomes visible again —
+   * scrollTo is a no-op on display:none subtrees.
+   */
+  visible?: boolean;
 }
 
 function createEntryId(): string {
   return `chat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+/** Restore the persisted active agent (F3) if it still exists. */
+function loadActiveAgentId(agents: AgentSpec[]): string | null {
+  try {
+    const stored = window.localStorage.getItem(ACTIVE_AGENT_KEY);
+    if (stored && agents.some((a) => a.id === stored)) return stored;
+  } catch {
+    // storage unavailable — fall through
+  }
+  return agents[0]?.id ?? null;
 }
 
 /**
@@ -29,12 +59,13 @@ function createEntryId(): string {
  * "Hey everyone, ...") via routePrompt + dispatchToAgents; quick-tap chips
  * inject the wake-word prefix; no wake word -> the active agent chip.
  */
-export function ChatPanel({ agents, paired }: ChatPanelProps) {
+export function ChatPanel({ agents, paired, onSendReady, onReflexResponse, visible = true }: ChatPanelProps) {
   const [entries, setEntries] = useState<ChatEntry[]>(loadChatLog);
   const [input, setInput] = useState('');
-  const [activeAgentId, setActiveAgentId] = useState<string | null>(agents[0]?.id ?? null);
+  const [activeAgentId, setActiveAgentId] = useState<string | null>(() => loadActiveAgentId(agents));
   const [sending, setSending] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const entriesRef = useRef(entries);
   entriesRef.current = entries;
 
@@ -62,22 +93,36 @@ export function ChatPanel({ agents, paired }: ChatPanelProps) {
     if (agents.length === 0) {
       setActiveAgentId(null);
     } else if (!agents.some((a) => a.id === activeAgentId)) {
-      setActiveAgentId(agents[0].id);
+      setActiveAgentId(loadActiveAgentId(agents));
     }
   }, [agents, activeAgentId]);
+
+  // Persist the active agent so it (and its wake-word chip highlight)
+  // survives a reload.
+  useEffect(() => {
+    if (!activeAgentId) return;
+    try {
+      window.localStorage.setItem(ACTIVE_AGENT_KEY, activeAgentId);
+    } catch {
+      // storage unavailable — fail silently
+    }
+  }, [activeAgentId]);
 
   // Persist the log (thinking placeholders are dropped on reload).
   useEffect(() => {
     saveChatLog(entries.filter((e) => e.status !== 'thinking'));
   }, [entries]);
 
-  // Auto-scroll to the newest message.
+  // Auto-scroll to the newest message. Paired mode (car display) jumps
+  // instantly — smooth scrolling reads as viewport jitter there. Also
+  // re-snaps when the tab becomes visible again after being hidden
+  // (scrollTo is a no-op on display:none subtrees).
   useEffect(() => {
     const el = scrollRef.current;
-    if (el) {
-      el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+    if (el && visible) {
+      el.scrollTo({ top: el.scrollHeight, behavior: paired ? 'auto' : 'smooth' });
     }
-  }, [entries]);
+  }, [entries, paired, visible]);
 
   const applyUpdate = useCallback((updated: ChatEntry) => {
     setEntries((prev) => {
@@ -218,6 +263,7 @@ export function ChatPanel({ agents, paired }: ChatPanelProps) {
         };
         setEntries((prev) => [...prev, userEntry]);
         appendSystemEntry(reflex.response ?? 'Done.');
+        onReflexResponse?.(reflex.response ?? 'Done.');
         setInput('');
         return;
       }
@@ -234,7 +280,51 @@ export function ChatPanel({ agents, paired }: ChatPanelProps) {
     }
 
     await dispatchLocal(text);
-  }, [dispatchLocal, appendSystemEntry]);
+  }, [dispatchLocal, appendSystemEntry, onReflexResponse]);
+
+  // Expose the send path (reflex-first, then dispatch/forward) to the
+  // Voice Chat tab so finalized voice transcripts flow exactly like typed
+  // input.
+  const sendRef = useRef(send);
+  useEffect(() => {
+    sendRef.current = send;
+  }, [send]);
+  useEffect(() => {
+    onSendReady?.((text: string) => sendRef.current(text));
+  }, [onSendReady]);
+
+  // External system entries (e.g. "Settings synced from hub" from App's
+  // settings-sync listener) append through state so they render live AND
+  // persist via the normal save effect.
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const text = (event as CustomEvent<unknown>).detail;
+      if (typeof text === 'string' && text.trim()) {
+        appendSystemEntry(text);
+      }
+    };
+    window.addEventListener(CHAT_SYSTEM_ENTRY_EVENT, handler);
+    return () => window.removeEventListener(CHAT_SYSTEM_ENTRY_EVENT, handler);
+  }, [appendSystemEntry]);
+
+  // `+` file picker: .txt/.md content appends to the draft; anything else
+  // gets an honest system notice (no fake parsing).
+  const handleFileChosen = useCallback((e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // allow picking the same file again
+    if (!file) return;
+    const name = file.name.toLowerCase();
+    if (name.endsWith('.txt') || name.endsWith('.md')) {
+      file
+        .text()
+        .then((text) => {
+          setInput((prev) => (prev.trim() ? `${prev}\n${text}` : text));
+        })
+        .catch(() => appendSystemEntry('Could not read that file.'));
+    } else {
+      appendSystemEntry("That file type isn't readable here yet");
+    }
+  }, [appendSystemEntry]);
 
   const handleSubmit = useCallback((e: FormEvent) => {
     e.preventDefault();
@@ -333,8 +423,32 @@ export function ChatPanel({ agents, paired }: ChatPanelProps) {
         )}
       </div>
 
-      {/* Input bar */}
+      {/* Input bar: `+` file picker far LEFT, mic stub immediately RIGHT of Send */}
       <form onSubmit={handleSubmit} className="flex-none p-4 flex items-center gap-3">
+        <input
+          ref={fileInputRef}
+          type="file"
+          className="hidden"
+          tabIndex={-1}
+          aria-hidden="true"
+          onChange={handleFileChosen}
+        />
+        <button
+          type="button"
+          onClick={() => fileInputRef.current?.click()}
+          disabled={agents.length === 0}
+          className="min-h-14 min-w-14 flex-none flex items-center justify-center rounded-2xl
+                     bg-ario-card border border-white/10 text-ario-muted
+                     transition-all active:scale-95 hover:border-ario-turquoise/50 hover:text-ario-text
+                     focus:outline-none focus:ring-2 focus:ring-ario-turquoise/50
+                     disabled:opacity-40 disabled:cursor-not-allowed"
+          aria-label="Attach a .txt or .md file to the message"
+          title="Attach a .txt or .md file to the message"
+        >
+          <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+          </svg>
+        </button>
         <input
           type="text"
           value={input}
@@ -365,6 +479,26 @@ export function ChatPanel({ agents, paired }: ChatPanelProps) {
         >
           <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5" />
+          </svg>
+        </button>
+        {/* Mic stub — voice capture lives one tap away in the Voice Chat
+            tab; this keeps the affordance discoverable without a second,
+            divergent recording path. */}
+        <button
+          type="button"
+          disabled
+          className="min-h-14 min-w-14 flex-none flex items-center justify-center rounded-2xl
+                     bg-ario-card border border-white/10 text-ario-muted
+                     opacity-40 cursor-not-allowed"
+          aria-label="Voice input lives in the Voice Chat tab"
+          title="Voice input lives in the Voice Chat tab"
+        >
+          <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z"
+            />
           </svg>
         </button>
       </form>
