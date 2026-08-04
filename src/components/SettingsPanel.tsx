@@ -1,7 +1,10 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { ModelSelector } from './ModelSelector';
 import { ThemeSwitcher } from './ThemeSwitcher';
 import { getApiKey, setApiKey, getOllamaBaseUrl, setOllamaBaseUrl } from '../lib/providers';
+import { getBridgeSession } from '../lib/bridge/session';
+import type { BridgeStatus } from '../lib/bridge/types';
+import { sendSettingsSync } from '../lib/settings-sync';
 import type { Theme } from '../lib/theme';
 import type { ModelInfo } from '../lib/model-registry';
 
@@ -58,6 +61,35 @@ export function SettingsPanel({
   const [ghToken, setGhToken] = useState(loadGithubToken);
   const [showGhToken, setShowGhToken] = useState(false);
   const [confirmReset, setConfirmReset] = useState(false);
+  const [bridgeStatus, setBridgeStatus] = useState<BridgeStatus>(() => getBridgeSession().getStatus());
+  const [syncStatus, setSyncStatus] = useState<{ ok: boolean; text: string } | null>(null);
+  const syncTimerRef = useRef<number | null>(null);
+
+  // Live bridge rung for the settings-sync gate.
+  useEffect(() => {
+    const session = getBridgeSession();
+    session.onStatus(setBridgeStatus);
+    setBridgeStatus(session.getStatus());
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (syncTimerRef.current !== null) window.clearTimeout(syncTimerRef.current);
+    };
+  }, []);
+
+  const syncReady = bridgeStatus.rung === 'webrtc' && bridgeStatus.connected;
+
+  const handleSyncNow = useCallback(() => {
+    const result = sendSettingsSync();
+    setSyncStatus(
+      result.sent
+        ? { ok: true, text: 'Sync sent' }
+        : { ok: false, text: result.reason ?? 'Sync failed' }
+    );
+    if (syncTimerRef.current !== null) window.clearTimeout(syncTimerRef.current);
+    syncTimerRef.current = window.setTimeout(() => setSyncStatus(null), 4000);
+  }, []);
 
   const handleSaveOrKey = useCallback(() => {
     setApiKey('openrouter', orKey.trim());
@@ -220,6 +252,40 @@ export function SettingsPanel({
             >
               {showDebug ? 'On' : 'Off'}
             </button>
+          </div>
+        </section>
+
+        {/* Settings sync to paired display (hub → display, WebRTC rung only) */}
+        <section className={sectionClass}>
+          <h3 className={headingClass}>Sync settings to paired display</h3>
+          <p className={hintClass}>
+            Pushes provider keys, Ollama URL, agents, theme and the capture model to the
+            paired car display.
+          </p>
+          {!syncReady && (
+            <p className="text-amber-300/90 text-sm leading-relaxed">
+              Settings sync needs the WebRTC rung (keys never transit the Gist mailbox).
+              Pair in the Bridge tab and wait for the WebRTC rung to connect.
+            </p>
+          )}
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={handleSyncNow}
+              disabled={!syncReady}
+              className="ario-button bg-ario-turquoise/15 border-ario-turquoise/50 text-ario-turquoise
+                         disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              Sync now
+            </button>
+            {syncStatus && (
+              <span
+                role="status"
+                className={`text-sm ${syncStatus.ok ? 'text-ario-turquoise' : 'text-ario-red'}`}
+              >
+                {syncStatus.text}
+              </span>
+            )}
           </div>
         </section>
 
