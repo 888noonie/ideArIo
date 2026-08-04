@@ -34,9 +34,19 @@ function loadComments(): NoteComments {
   return {};
 }
 
+// Unbounded comment growth would eventually blow the localStorage quota
+// (F-16): keep the newest comments per note and the newest notes overall.
+const MAX_COMMENTS_PER_NOTE = 50;
+const MAX_COMMENTED_NOTES = 100;
+
 function saveComments(comments: NoteComments): void {
   try {
-    window.localStorage.setItem(COMMENTS_KEY, JSON.stringify(comments));
+    const entries = Object.entries(comments)
+      .map(([id, list]) => [id, list.slice(-MAX_COMMENTS_PER_NOTE)] as const)
+      .filter(([, list]) => list.length > 0)
+      .sort((a, b) => (b[1][b[1].length - 1]?.ts ?? 0) - (a[1][a[1].length - 1]?.ts ?? 0))
+      .slice(0, MAX_COMMENTED_NOTES);
+    window.localStorage.setItem(COMMENTS_KEY, JSON.stringify(Object.fromEntries(entries)));
   } catch {
     // storage unavailable — fail silently
   }

@@ -233,9 +233,16 @@ class BridgeSessionImpl implements BridgeSession {
       console.warn('Bridge mailbox poll failed:', error);
     }
     // Reschedule at the CURRENT rung's interval (may have changed mid-poll).
-    this.schedulePoll(
-      this.rung === 'webrtc' ? KEEPALIVE_POLL_MS : intervalMs === KEEPALIVE_POLL_MS ? intervalMs : MAILBOX_POLL_MS
-    );
+    let nextMs: number;
+    if (this.rung === 'webrtc') {
+      nextMs = KEEPALIVE_POLL_MS;
+    } else if (intervalMs === KEEPALIVE_POLL_MS) {
+      // Mid-demote from WebRTC: keep the keepalive cadence for one more tick.
+      nextMs = intervalMs;
+    } else {
+      nextMs = MAILBOX_POLL_MS;
+    }
+    this.schedulePoll(nextMs);
   }
 
   private sendOverMailbox(env: BridgeEnvelope): void {
