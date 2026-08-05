@@ -16,6 +16,7 @@ export interface ChatEntry {
 }
 
 const STORAGE_KEY = 'ideario-chat-log';
+const STORAGE_VERSION = 1;
 const MAX_ENTRIES = 200;
 const HISTORY_ENTRIES = 20;
 
@@ -32,8 +33,21 @@ export function loadChatLog(): ChatEntry[] {
   if (!raw) return [];
   try {
     const parsed = JSON.parse(raw) as unknown;
-    if (!Array.isArray(parsed)) return [];
-    return (parsed as ChatEntry[]).slice(-MAX_ENTRIES);
+    // v0: bare array. v1+: { version, data: ChatEntry[] }
+    let entries: unknown;
+    if (Array.isArray(parsed)) {
+      entries = parsed; // v0 — migrate on next save
+    } else if (
+      parsed &&
+      typeof parsed === 'object' &&
+      Array.isArray((parsed as { data?: unknown }).data)
+    ) {
+      entries = (parsed as { data: unknown[] }).data;
+    } else {
+      return [];
+    }
+    if (!Array.isArray(entries)) return [];
+    return (entries as ChatEntry[]).slice(-MAX_ENTRIES);
   } catch {
     return [];
   }
@@ -41,10 +55,8 @@ export function loadChatLog(): ChatEntry[] {
 
 export function saveChatLog(entries: ChatEntry[]): void {
   try {
-    window.localStorage.setItem(
-      STORAGE_KEY,
-      JSON.stringify(entries.slice(-MAX_ENTRIES))
-    );
+    const envelope = { version: STORAGE_VERSION, data: entries.slice(-MAX_ENTRIES) };
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(envelope));
   } catch {
     // storage unavailable — fail silently
   }

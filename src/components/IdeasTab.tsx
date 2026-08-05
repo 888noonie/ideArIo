@@ -18,14 +18,24 @@ interface NoteComment {
 type NoteComments = Record<string, NoteComment[]>;
 
 const COMMENTS_KEY = 'ideario-note-comments';
+const COMMENTS_VERSION = 1;
 
 function loadComments(): NoteComments {
   try {
     const raw = window.localStorage.getItem(COMMENTS_KEY);
     if (raw) {
       const parsed = JSON.parse(raw) as unknown;
+      // v0: bare NoteComments object. v1+: { version, data }
+      let obj: unknown;
       if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-        return parsed as NoteComments;
+        if ('data' in parsed && 'version' in parsed) {
+          obj = (parsed as { data: unknown }).data;
+        } else {
+          obj = parsed; // v0
+        }
+        if (obj && typeof obj === 'object' && !Array.isArray(obj)) {
+          return obj as NoteComments;
+        }
       }
     }
   } catch {
@@ -46,7 +56,7 @@ function saveComments(comments: NoteComments): void {
       .filter(([, list]) => list.length > 0)
       .sort((a, b) => (b[1][b[1].length - 1]?.ts ?? 0) - (a[1][a[1].length - 1]?.ts ?? 0))
       .slice(0, MAX_COMMENTED_NOTES);
-    window.localStorage.setItem(COMMENTS_KEY, JSON.stringify(Object.fromEntries(entries)));
+    window.localStorage.setItem(COMMENTS_KEY, JSON.stringify({ version: COMMENTS_VERSION, data: Object.fromEntries(entries) }));
   } catch {
     // storage unavailable — fail silently
   }
