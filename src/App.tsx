@@ -21,7 +21,8 @@ import {
 import { loadTheme, saveTheme, applyTheme, type Theme } from './lib/theme';
 import { loadAgents, saveAgents, DEFAULT_AGENTS, type AgentSpec } from './lib/agents';
 import { CHAT_SYSTEM_ENTRY_EVENT } from './lib/chat-engine';
-import { initSettingsSyncListener, type SyncedSettings } from './lib/settings-sync';
+import { initSettingsSyncListener, takePendingSettings, type SyncedSettings } from './lib/settings-sync';
+import { SettingsSyncPrompt } from './components/SettingsSyncPrompt';
 import type { ArioState, IdearioYAML, SavedIdeario } from './types/ideario';
 import type { ModelInfo } from './lib/model-registry';
 
@@ -63,6 +64,7 @@ export default function App() {
   const [showDebug, setShowDebug] = useState(false);
   const [agents, setAgents] = useState<AgentSpec[]>(loadAgents);
   const [paired, setPaired] = useState<boolean>(loadPaired);
+  const [pendingSync, setPendingSync] = useState<SyncedSettings | null>(null);
 
   // The Voice Chat tab registers ChatPanel's send path here; finalized
   // voice transcripts flow through it (reflex lane FIRST, then dispatch)
@@ -147,41 +149,56 @@ export default function App() {
       .catch(() => setSavedIdeas([]));
   }, []);
 
-  // Settings sync (F2/A4): display role applies hub-pushed settings to
-  // React state AND the existing localStorage keys, then appends a system
-  // chat entry. Display never echoes settings back.
+  // Settings sync (F2/A4 + S-03): display role STAGES hub-pushed settings and
+  // shows a prompt; nothing is written until the user explicitly accepts.
+  // Display never echoes settings back.
+  const applySyncedSettings = useCallback((s: SyncedSettings) => {
+    try {
+      for (const [providerId, key] of Object.entries(s.providerKeys ?? {})) {
+        localStorage.setItem(`ideario-key-${providerId}`, key);
+      }
+      if (typeof s.ollamaBaseUrl === 'string') {
+        localStorage.setItem('ideario-ollama-url', s.ollamaBaseUrl);
+      }
+    } catch {
+      // Ignore localStorage errors
+    }
+    if (Array.isArray(s.agents) && s.agents.length > 0) {
+      saveAgents(s.agents);
+      setAgents(s.agents);
+    }
+    if (s.theme === 'light' || s.theme === 'dark') {
+      applyTheme(s.theme);
+      saveTheme(s.theme);
+      setTheme(s.theme);
+    }
+    if (typeof s.selectedModelId === 'string' && s.selectedModelId) {
+      saveSelectedModelId(s.selectedModelId);
+      setSelectedModelId(s.selectedModelId);
+    }
+    // Single write path: ping the always-mounted chat panel via the window
+    // event; it appends the entry and persists through its normal save
+    // effect. (A direct saveChatLog here raced that effect — F-07.)
+    window.dispatchEvent(
+      new CustomEvent(CHAT_SYSTEM_ENTRY_EVENT, { detail: 'Settings synced from hub' })
+    );
+  }, []);
+
   useEffect(() => {
     initSettingsSyncListener((s: SyncedSettings) => {
-      try {
-        for (const [providerId, key] of Object.entries(s.providerKeys ?? {})) {
-          localStorage.setItem(`ideario-key-${providerId}`, key);
-        }
-        if (typeof s.ollamaBaseUrl === 'string') {
-          localStorage.setItem('ideario-ollama-url', s.ollamaBaseUrl);
-        }
-      } catch {
-        // Ignore localStorage errors
-      }
-      if (Array.isArray(s.agents) && s.agents.length > 0) {
-        saveAgents(s.agents);
-        setAgents(s.agents);
-      }
-      if (s.theme === 'light' || s.theme === 'dark') {
-        applyTheme(s.theme);
-        saveTheme(s.theme);
-        setTheme(s.theme);
-      }
-      if (typeof s.selectedModelId === 'string' && s.selectedModelId) {
-        saveSelectedModelId(s.selectedModelId);
-        setSelectedModelId(s.selectedModelId);
-      }
-      // Single write path: ping the always-mounted chat panel via the window
-      // event; it appends the entry and persists through its normal save
-      // effect. (A direct saveChatLog here raced that effect — F-07.)
-      window.dispatchEvent(
-        new CustomEvent(CHAT_SYSTEM_ENTRY_EVENT, { detail: 'Settings synced from hub' })
-      );
+      setPendingSync(s); // stage only — no writes until Accept
     });
+  }, []);
+
+  const handleSyncAccept = useCallback(() => {
+    const s = takePendingSettings();
+    if (s) applySyncedSettings(s);
+    setPendingSync(null);
+  }, [applySyncedSettings]);
+
+  const handleSyncDecline = useCallback(() => {
+    takePendingSettings(); // discard
+    setPendingSync(null);
   }, []);
 
   // Online/offline detection
@@ -470,6 +487,14 @@ export default function App() {
       </div>
 
       {showDebug && <DebugOverlay onClose={handleToggleDebug} />}
+
+      {pendingSync && (
+        <SettingsSyncPrompt
+          settings={pendingSync}
+          onAccept={handleSyncAccept}
+          onDecline={handleSyncDecline}
+        />
+      )}
     </div>
   );
 }

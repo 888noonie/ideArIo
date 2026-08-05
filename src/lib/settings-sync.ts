@@ -66,18 +66,32 @@ export function sendSettingsSync(): { sent: boolean; reason?: string } {
 }
 
 /**
- * Display side: listen for 'settings-sync' state envelopes and hand the
- * settings to `apply` (which persists them + updates React state). The
- * display role NEVER echoes settings back.
+ * Display side: listen for 'settings-sync' state envelopes and STAGE the
+ * settings (S-03) — nothing is written until the user explicitly accepts via
+ * `takePendingSettings()`. The display role NEVER echoes settings back.
+ *
+ * S-03: previously this auto-applied the hub's settings the moment they
+ * arrived. A forged peer (see S-02) could inject keys/config. Now the
+ * listener only stages; the UI shows a prompt and applies on explicit Accept.
  */
-export function initSettingsSyncListener(apply: (s: SyncedSettings) => void): void {
+let pendingSettings: SyncedSettings | null = null;
+
+export function initSettingsSyncListener(onPending: (s: SyncedSettings) => void): void {
   const session = getBridgeSession();
   session.onMessage((env) => {
     if (env.type !== 'state') return;
     if (session.getStatus().role !== 'display') return;
     const payload = env.payload as SettingsSyncPayload | null;
     if (payload?.kind === 'settings-sync' && payload.settings) {
-      apply(payload.settings);
+      pendingSettings = payload.settings;
+      onPending(payload.settings); // UI shows a prompt; nothing is written yet
     }
   });
+}
+
+/** Consume (and clear) the staged settings. Returns null if none pending. */
+export function takePendingSettings(): SyncedSettings | null {
+  const s = pendingSettings;
+  pendingSettings = null;
+  return s;
 }
