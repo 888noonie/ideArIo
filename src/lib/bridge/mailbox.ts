@@ -22,6 +22,12 @@ const TOKEN_KEY = 'ideario-github-token';
 const FILE_NAME = 'messages.json';
 const MAX_ENVELOPES = 100;
 
+// Pairing-code expiry (F-01): a mailbox is valid for 24h. The hub refreshes
+// the expiry on each poll near the end, so an active pairing never lapses;
+// a stale/abandoned mailbox expires and the display gets a clear error.
+const MAILBOX_TTL_MS = 24 * 60 * 60 * 1000; // 24h — generous for a pairing session
+const MAILBOX_REFRESH_THRESHOLD = MAILBOX_TTL_MS / 4; // refresh in last 25%
+
 export interface Mailbox {
   send(env: BridgeEnvelope): Promise<void>;
   poll(): Promise<BridgeEnvelope[]>;
@@ -29,6 +35,7 @@ export interface Mailbox {
 
 interface MailboxFile {
   envelopes: BridgeEnvelope[];
+  expires_at?: number; // epoch ms; 0/absent = no expiry (back-compat)
 }
 
 interface GistListEntry {
@@ -85,7 +92,9 @@ async function createMailboxGist(token: string, code: string): Promise<string> {
       description: mailboxDescription(code),
       public: false,
       files: {
-        [FILE_NAME]: { content: JSON.stringify({ envelopes: [] }) },
+        [FILE_NAME]: {
+          content: JSON.stringify({ envelopes: [], expires_at: Date.now() + MAILBOX_TTL_MS }),
+        },
       },
     }),
   });
@@ -96,7 +105,7 @@ async function createMailboxGist(token: string, code: string): Promise<string> {
   return gist.id;
 }
 
-async function readEnvelopes(token: string, gistId: string): Promise<BridgeEnvelope[]> {
+async function readMailboxFile(token: string, gistId: string): Promise<MailboxFile> {
   const response = await fetch(`${GITHUB_API}/gists/${gistId}`, {
     headers: headers(token),
   });
@@ -105,40 +114,46 @@ async function readEnvelopes(token: string, gistId: string): Promise<BridgeEnvel
   }
   const gist = (await response.json()) as GistDetail;
   const file = gist.files[FILE_NAME];
-  if (!file) return [];
+  if (!file) return { envelopes: [] };
 
   let content = file.content;
   if ((!content || file.truncated) && file.raw_url) {
     content = await fetch(file.raw_url).then((r) => (r.ok ? r.text() : ''));
   }
-  if (!content) return [];
+  if (!content) return { envelopes: [] };
 
   try {
     const parsed = JSON.parse(content) as MailboxFile;
-    if (!Array.isArray(parsed.envelopes)) return [];
-    return parsed.envelopes.filter(
-      (env) => env && typeof env.id === 'string' && typeof env.ts === 'number'
-    );
+    if (!Array.isArray(parsed.envelopes)) return { envelopes: [] };
+    return {
+      envelopes: parsed.envelopes.filter(
+        (env) => env && typeof env.id === 'string' && typeof env.ts === 'number'
+      ),
+      expires_at: parsed.expires_at,
+    };
   } catch {
-    return [];
+    return { envelopes: [] };
   }
 }
 
 async function writeEnvelopes(
   token: string,
   gistId: string,
-  envelopes: BridgeEnvelope[]
+  envelopes: BridgeEnvelope[],
+  expiresAt?: number
 ): Promise<void> {
   const capped = envelopes
     .slice()
     .sort((a, b) => a.ts - b.ts)
     .slice(-MAX_ENVELOPES);
+  const file: MailboxFile = { envelopes: capped };
+  if (expiresAt) file.expires_at = expiresAt;
   const response = await fetch(`${GITHUB_API}/gists/${gistId}`, {
     method: 'PATCH',
     headers: { ...headers(token), 'Content-Type': 'application/json' },
     body: JSON.stringify({
       files: {
-        [FILE_NAME]: { content: JSON.stringify({ envelopes: capped }) },
+        [FILE_NAME]: { content: JSON.stringify(file) },
       },
     }),
   });
@@ -160,6 +175,15 @@ export async function openMailbox(code: string): Promise<Mailbox> {
   const existing = await findMailboxGist(token, code);
   const gistId = existing ? existing.id : await createMailboxGist(token, code);
 
+  // Expiry check (F-01): a mailbox past its expires_at is treated as
+  // not-found so the display surfaces a clear "generate a new code" error
+  // instead of silently serving stale content. Absent expires_at (old
+  // mailboxes) = no expiry, for back-compat.
+  const initial = await readMailboxFile(token, gistId);
+  if (initial.expires_at && Date.now() > initial.expires_at) {
+    throw new Error('Pairing code expired — generate a new one on the phone.');
+  }
+
   // High-water mark: envelopes at/below this ts have already been
   // delivered to poll() callers. Envelope ids are also tracked so
   // same-millisecond arrivals are not lost.
@@ -168,16 +192,21 @@ export async function openMailbox(code: string): Promise<Mailbox> {
 
   return {
     async send(env: BridgeEnvelope): Promise<void> {
-      const current = await readEnvelopes(token, gistId);
+      const current = await readMailboxFile(token, gistId);
       const byId = new Map<string, BridgeEnvelope>();
-      for (const existingEnv of current) byId.set(existingEnv.id, existingEnv);
+      for (const existingEnv of current.envelopes) byId.set(existingEnv.id, existingEnv);
       byId.set(env.id, env);
-      await writeEnvelopes(token, gistId, [...byId.values()]);
+      await writeEnvelopes(token, gistId, [...byId.values()], current.expires_at);
     },
 
     async poll(): Promise<BridgeEnvelope[]> {
-      const current = await readEnvelopes(token, gistId);
-      const fresh = current
+      const current = await readMailboxFile(token, gistId);
+      // Refresh the expiry near the end of its life so an active pairing
+      // never lapses (cheap extra write, only in the last 25% of TTL).
+      if (current.expires_at && Date.now() + MAILBOX_REFRESH_THRESHOLD > current.expires_at) {
+        await writeEnvelopes(token, gistId, current.envelopes, Date.now() + MAILBOX_TTL_MS);
+      }
+      const fresh = current.envelopes
         .filter((env) => env.ts > lastSeenTs || !seenIds.has(env.id))
         .sort((a, b) => a.ts - b.ts);
       for (const env of fresh) {
@@ -186,7 +215,7 @@ export async function openMailbox(code: string): Promise<Mailbox> {
       }
       // Bound the seen-id set so long sessions do not grow it forever.
       if (seenIds.size > MAX_ENVELOPES * 4) {
-        const keep = new Set(current.map((env) => env.id));
+        const keep = new Set(current.envelopes.map((env) => env.id));
         for (const id of seenIds) {
           if (!keep.has(id)) seenIds.delete(id);
         }
