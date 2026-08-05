@@ -27,6 +27,15 @@ export function setCrewAudioEnabled(on: boolean): void {
 let lastReply: string | null = null;
 let initialized = false;
 
+// F-13: crew speech is serialized through a FIFO queue. Previously each
+// speakAgentReply call did speechSynthesis.cancel() then re-queued its own
+// chunks, so a broadcast ("Hey everyone") where several agents finish in the
+// same tick would have each later agent's cancel() interrupt the previous
+// speaker mid-sentence — only the last-finishing agent was heard in full.
+// Now replies are spoken one at a time, advancing on utterance end.
+const replyQueue: string[] = [];
+let queueActive = false;
+
 export function isSpeaking(): boolean {
   try {
     return 'speechSynthesis' in window && window.speechSynthesis.speaking;
@@ -35,9 +44,11 @@ export function isSpeaking(): boolean {
   }
 }
 
-/** Stop any in-flight crew speech. Returns true if it was speaking. */
+/** Stop any in-flight crew speech and clear the pending queue. */
 export function stopSpeaking(): boolean {
   const was = isSpeaking();
+  replyQueue.length = 0;
+  queueActive = false;
   try {
     if ('speechSynthesis' in window) {
       window.speechSynthesis.cancel();
@@ -70,6 +81,46 @@ function chunkSentences(text: string): string[] {
   return chunks.filter(Boolean);
 }
 
+/** Speak the next queued reply (if any). Called when the queue is idle. */
+function pumpQueue(): void {
+  if (queueActive) return;
+  const next = replyQueue.shift();
+  if (next === undefined) return;
+  queueActive = true;
+
+  const chunks = chunkSentences(next);
+  if (chunks.length === 0) {
+    queueActive = false;
+    pumpQueue();
+    return;
+  }
+
+  try {
+    const synth = window.speechSynthesis;
+    // Speak all chunks of this reply; the LAST chunk's onend advances the
+    // queue to the next reply (or marks the queue idle).
+    chunks.forEach((chunk, i) => {
+      const utterance = new SpeechSynthesisUtterance(chunk);
+      utterance.rate = 1.0;
+      if (i === chunks.length - 1) {
+        utterance.onend = () => {
+          queueActive = false;
+          pumpQueue();
+        };
+        utterance.onerror = () => {
+          queueActive = false;
+          pumpQueue();
+        };
+      }
+      synth.speak(utterance);
+    });
+  } catch {
+    // speech unavailable — fail silently, move on
+    queueActive = false;
+    pumpQueue();
+  }
+}
+
 /** Speak an agent reply aloud. No-op when crew audio is disabled. */
 export function speakAgentReply(text: string): void {
   if (!isCrewAudioEnabled()) return;
@@ -78,16 +129,8 @@ export function speakAgentReply(text: string): void {
   if (!trimmed) return;
 
   lastReply = trimmed;
-  try {
-    window.speechSynthesis.cancel(); // never stack utterances
-    for (const chunk of chunkSentences(trimmed)) {
-      const utterance = new SpeechSynthesisUtterance(chunk);
-      utterance.rate = 1.0;
-      window.speechSynthesis.speak(utterance);
-    }
-  } catch {
-    // speech unavailable — fail silently
-  }
+  replyQueue.push(trimmed);
+  pumpQueue();
 }
 
 /**
@@ -123,7 +166,10 @@ export function initCrewAudio(): void {
     navigator.mediaSession.setActionHandler(
       'previoustrack',
       guard(() => {
-        if (lastReply) speakAgentReply(lastReply);
+        if (lastReply) {
+          stopSpeaking(); // clear the queue, then replay the last reply
+          speakAgentReply(lastReply);
+        }
       })
     );
   } catch {
