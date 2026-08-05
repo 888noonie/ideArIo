@@ -53,6 +53,8 @@ export interface BridgeSession {
   onMessage(cb: (env: BridgeEnvelope) => void): void;
   onStatus(cb: (s: BridgeStatus) => void): void;
   getStatus(): BridgeStatus;
+  /** S-02: mark the 4-digit SAS code as confirmed by the user. */
+  confirmSas(): void;
 }
 
 function createEnvelopeId(): string {
@@ -69,6 +71,10 @@ class BridgeSessionImpl implements BridgeSession {
   private mailbox: Mailbox | null = null;
   private pc: RTCPeerConnection | null = null;
   private dc: RTCDataChannel | null = null;
+
+  // S-02: Short Authentication String state.
+  private sas: string | null = null;
+  private sasVerified = false;
 
   private pollTimer: ReturnType<typeof setTimeout> | null = null;
   private reprobeTimer: ReturnType<typeof setTimeout> | null = null;
@@ -130,6 +136,8 @@ class BridgeSessionImpl implements BridgeSession {
     this.rung = 'offline';
     this.connected = false;
     this.lastPeerSeen = null;
+    this.sas = null;
+    this.sasVerified = false;
     this.seenIds.clear();
     this.outboundBuffer = [];
     this.emitStatus();
@@ -173,7 +181,16 @@ class BridgeSessionImpl implements BridgeSession {
       lastPeerSeen: this.lastPeerSeen,
       upgrading: this.upgrading,
       nextReprobeInMs: this.nextReprobeInMs,
+      sas: this.sas,
+      sasVerified: this.sasVerified,
     };
+  }
+
+  /** S-02: user confirmed the 4-digit code matches on both devices. */
+  confirmSas(): void {
+    if (this.sas === null) return; // nothing to confirm
+    this.sasVerified = true;
+    this.emitStatus();
   }
 
   // -- status / presence ----------------------------------------------------
@@ -369,6 +386,12 @@ class BridgeSessionImpl implements BridgeSession {
       this.schedulePoll(KEEPALIVE_POLL_MS); // mailbox drops to 30s keepalive
       this.resetReprobeBackoff();
       this.notePeerSeen();
+      // S-02: recompute the SAS on every (re)open; reset verification.
+      this.sasVerified = false;
+      this.deriveSas().then((sas) => {
+        this.sas = sas;
+        this.emitStatus();
+      });
       this.emitStatus();
     };
     channel.onmessage = (event) => {
@@ -408,6 +431,38 @@ class BridgeSessionImpl implements BridgeSession {
       }
       this.pc = null;
     }
+  }
+
+  /**
+   * S-02: derive a 4-digit Short Authentication String from BOTH SDP
+   * fingerprints, sorted canonically, so both devices compute the SAME code.
+   *
+   * The audit's snippet used getRemoteCertificates() only — but the hub's
+   * "remote cert" is the display's cert and vice-versa, so the two devices
+   * would compute DIFFERENT codes. Combining both fingerprints in sorted
+   * order fixes that: honest peers share the same set, a MITM sees different
+   * sets per leg and the codes diverge.
+   *
+   * Returns null when it cannot be derived (no fingerprints, or crypto.subtle
+   * unavailable in a non-secure context — the expected degradation on the
+   * head unit's WebView). A null SAS means the link is UNVERIFIED and key
+   * sync must be blocked.
+   */
+  private async deriveSas(): Promise<string | null> {
+    const localSdp = this.pc?.localDescription?.sdp ?? '';
+    const remoteSdp = this.pc?.remoteDescription?.sdp ?? '';
+    const fp = (sdp: string): string | null => {
+      const m = sdp.match(/a=fingerprint:(?:sha-256|sha-1)\s+([0-9A-Fa-f:]+)/);
+      return m ? m[1].toUpperCase() : null;
+    };
+    const a = fp(localSdp);
+    const b = fp(remoteSdp);
+    if (!a || !b) return null;
+    const [x, y] = [a, b].sort(); // canonical order -> same on both sides
+    const bytes = new TextEncoder().encode(`${x}|${y}`);
+    if (typeof crypto === 'undefined' || !crypto.subtle) return null;
+    const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes));
+    return String(((digest[0] << 8) | digest[1]) % 10000).padStart(4, '0');
   }
 
   private sendSignal(payload: SignalPayload): void {

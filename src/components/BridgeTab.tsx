@@ -156,6 +156,11 @@ export function BridgeTab({ paired, onPairedChange }: BridgeTabProps) {
     window.open(url, '_blank', 'noopener,noreferrer');
   }, []);
 
+  // S-02: user confirms the 4-digit SAS code matches on both devices.
+  const handleConfirmSas = useCallback(() => {
+    sessionRef.current.confirmSas();
+  }, []);
+
   const rung = RUNG_META[status.rung];
   const active = status.role !== null;
 
@@ -276,6 +281,37 @@ export function BridgeTab({ paired, onPairedChange }: BridgeTabProps) {
           {status.upgrading && status.rung === 'mailbox' && (
             <p className="mt-3 text-ario-muted text-sm" role="status">
               Still trying to upgrade to a direct connection…
+            </p>
+          )}
+
+          {/* S-02: SAS peer verification. Show the 4-digit code on both
+              devices; keys won't sync until the user confirms it matches. */}
+          {status.rung === 'webrtc' && status.sas !== null && (
+            <div className="mt-4 rounded-2xl bg-ario-card border border-white/10 p-4 text-center">
+              <p className="text-ario-muted text-sm mb-1">
+                {status.sasVerified
+                  ? 'Connection verified — keys can sync.'
+                  : 'Confirm this code matches the other device:'}
+              </p>
+              <p className="text-ario-turquoise text-5xl font-bold tracking-[0.3em] pl-2 select-all">
+                {status.sas}
+              </p>
+              {!status.sasVerified && (
+                <button
+                  type="button"
+                  onClick={handleConfirmSas}
+                  className="mt-4 w-full min-h-14 rounded-2xl bg-ario-turquoise/15 border border-ario-turquoise/50
+                             text-ario-turquoise text-base font-semibold transition-all active:scale-95
+                             hover:bg-ario-turquoise/25 focus:outline-none focus:ring-2 focus:ring-ario-turquoise/50"
+                >
+                  Code matches
+                </button>
+              )}
+            </div>
+          )}
+          {status.rung === 'webrtc' && status.sas === null && (
+            <p className="mt-3 text-ario-muted text-sm" role="status">
+              Couldn't verify this connection — keys won't sync until it's re-paired.
             </p>
           )}
 

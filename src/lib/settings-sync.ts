@@ -61,6 +61,14 @@ export function sendSettingsSync(): { sent: boolean; reason?: string } {
   if (!status.connected) {
     return { sent: false, reason: 'No paired display is connected right now.' };
   }
+  // S-02: keys only move over a SAS-verified link. A null SAS (couldn't
+  // derive) or an unconfirmed code blocks sync with honest copy.
+  if (status.sas === null || status.sasVerified !== true) {
+    return {
+      sent: false,
+      reason: 'Confirm the 4-digit code on both devices first.',
+    };
+  }
   session.send('state', { kind: 'settings-sync', settings: collectSettings() });
   return { sent: true };
 }
