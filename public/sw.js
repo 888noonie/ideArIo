@@ -4,10 +4,16 @@
  * - Runtime-caches same-origin static assets (JS/CSS/fonts/images) cache-first.
  * - NEVER caches /api/* or cross-origin requests (NVIDIA proxy, GitHub).
  * - Navigation requests fall back to the cached shell when offline.
+ *
+ * F-24: the cache version is tied to the build. `__BUILD_ID__` is replaced
+ * at build time by a Vite plugin (see vite.config.ts) with the git SHA, so a
+ * forgotten manual bump can never ship a stale shell to installed PWAs — the
+ * cache key changes automatically on every deploy.
  */
 
-const SHELL_CACHE = 'ideario-shell-v4';
-const RUNTIME_CACHE = 'ideario-runtime-v4';
+const BUILD_ID = '__BUILD_ID__';
+const SHELL_CACHE = `ideario-shell-${BUILD_ID}`;
+const RUNTIME_CACHE = `ideario-runtime-${BUILD_ID}`;
 
 const SHELL_ASSETS = ['/', '/index.html', '/manifest.json', '/favicon.svg', '/icons.svg'];
 

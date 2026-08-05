@@ -2,6 +2,8 @@ import { defineConfig, loadEnv, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 import path from 'path'
 import { fileURLToPath } from 'url'
+import { execSync } from 'node:child_process'
+import { readFileSync, writeFileSync } from 'node:fs'
 import { handleNimProxyRequest, type NimProxyBody } from './api/nim-handler.js'
 import { buildMockCompletion } from './src/lib/nim-mock.js'
 
@@ -72,6 +74,43 @@ function nimProxyDevPlugin(env: Record<string, string>): Plugin {
   };
 }
 
+/**
+ * F-24: inject a build ID (git SHA) into the built dist/sw.js so the
+ * service-worker cache keys change automatically on every deploy. A forgotten
+ * manual cache-version bump can no longer ship a stale shell to installed
+ * PWAs. The source public/sw.js keeps the `__BUILD_ID__` placeholder; only
+ * the emitted dist/sw.js is rewritten (in closeBundle, after Vite copies the
+ * public dir). Falls back to a timestamp when git isn't available.
+ */
+function swBuildIdPlugin(): Plugin {
+  const buildId = (() => {
+    try {
+      const sha = execSync('git rev-parse --short HEAD', { encoding: 'utf8' }).trim();
+      if (sha) return sha;
+    } catch {
+      // git unavailable — fall through
+    }
+    return Date.now().toString(36);
+  })();
+
+  return {
+    name: 'ideario-sw-build-id',
+    apply: 'build',
+    closeBundle() {
+      const outDir = path.resolve(__dirname, 'dist');
+      const swPath = path.join(outDir, 'sw.js');
+      try {
+        const source = readFileSync(swPath, 'utf8');
+        const replaced = source.replace(/__BUILD_ID__/g, buildId);
+        writeFileSync(swPath, replaced);
+      } catch (error) {
+        // eslint-disable-next-line no-console
+        console.warn('[sw-build-id] could not inject build id into dist/sw.js:', error);
+      }
+    },
+  };
+}
+
 // https://vite.dev/config/
 export default defineConfig(({ mode }) => {
   // Prefix '' loads every var from .env files (including NVIDIA_API_KEY),
@@ -80,7 +119,7 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, __dirname, '');
 
   return {
-    plugins: [react(), nimProxyDevPlugin(env)],
+    plugins: [react(), nimProxyDevPlugin(env), swBuildIdPlugin()],
     resolve: {
       alias: {
         '@': path.resolve(__dirname, './src'),
