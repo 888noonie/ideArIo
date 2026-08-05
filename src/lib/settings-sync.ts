@@ -9,7 +9,7 @@ import { getBridgeSession } from './bridge/session';
 import { loadAgents, type AgentSpec } from './agents';
 import { loadTheme } from './theme';
 import { allProviders, getApiKey, getOllamaBaseUrl } from './providers';
-import { loadSelectedModelId } from './model-registry';
+import { loadSelectedModelId } from './model-id';
 
 export interface SyncedSettings {
   providerKeys: Record<string, string>; // ideario-key-* values, keyed by provider id

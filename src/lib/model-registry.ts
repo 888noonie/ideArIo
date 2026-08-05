@@ -1,3 +1,5 @@
+import { DEFAULT_MODEL_ID } from './model-id';
+
 export interface ModelInfo {
   id: string;
   name: string;
@@ -5,8 +7,6 @@ export interface ModelInfo {
   description: string;
   tags: string[];
 }
-
-export const DEFAULT_MODEL_ID = 'deepseek-ai/deepseek-v4-pro';
 
 // Full registry of free NVIDIA NIM preview endpoints.
 // Add or remove entries here to update the dropdown and fallback cycle.
@@ -767,24 +767,4 @@ export function getModelById(id: string): ModelInfo | undefined {
 
 export function getDefaultModel(): ModelInfo {
   return getModelById(DEFAULT_MODEL_ID) || MODEL_REGISTRY[0];
-}
-
-export function loadSelectedModelId(): string {
-  try {
-    const stored = localStorage.getItem('ideario-selected-model');
-    if (stored && getModelById(stored)) {
-      return stored;
-    }
-  } catch {
-    // Ignore localStorage errors
-  }
-  return DEFAULT_MODEL_ID;
-}
-
-export function saveSelectedModelId(id: string): void {
-  try {
-    localStorage.setItem('ideario-selected-model', id);
-  } catch {
-    // Ignore localStorage errors
-  }
 }

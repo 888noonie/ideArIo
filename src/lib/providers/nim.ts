@@ -1,5 +1,4 @@
 import type { ChatProvider, ChatRequest } from './types';
-import { MODEL_REGISTRY } from '../model-registry';
 
 const TIMEOUT_MS = 30_000;
 
@@ -61,6 +60,8 @@ export const nimProvider: ChatProvider = {
   },
 
   async listModels(): Promise<string[]> {
+    // Lazy-load the 790-line registry so it stays out of the initial bundle.
+    const { MODEL_REGISTRY } = await import('../model-registry');
     return MODEL_REGISTRY.map((m) => m.id);
   },
 

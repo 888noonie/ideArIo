@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, lazy, Suspense } from 'react';
 import { StatusBar } from './components/StatusBar';
 import { DebugOverlay } from './components/DebugOverlay';
 import { TabBar, type TabId } from './components/TabBar';
@@ -7,7 +7,6 @@ import { IdeasTab } from './components/IdeasTab';
 import { HistoryTab } from './components/HistoryTab';
 import { BridgeTab } from './components/BridgeTab';
 import { AgentManager } from './components/AgentManager';
-import { SettingsPanel } from './components/SettingsPanel';
 import { useSpeechRecognition } from './hooks/useSpeechRecognition';
 import { useSpeechSynthesis } from './hooks/useSpeechSynthesis';
 import { useWakeWord } from './hooks/useWakeWord';
@@ -18,13 +17,19 @@ import { loadFromLocalDB, markAsSynced } from './lib/storage';
 import {
   loadSelectedModelId,
   saveSelectedModelId,
-} from './lib/model-registry';
+} from './lib/model-id';
 import { loadTheme, saveTheme, applyTheme, type Theme } from './lib/theme';
 import { loadAgents, saveAgents, DEFAULT_AGENTS, type AgentSpec } from './lib/agents';
 import { CHAT_SYSTEM_ENTRY_EVENT } from './lib/chat-engine';
 import { initSettingsSyncListener, type SyncedSettings } from './lib/settings-sync';
 import type { ArioState, IdearioYAML, SavedIdeario } from './types/ideario';
 import type { ModelInfo } from './lib/model-registry';
+
+// Lazy-load the Settings tab so the 790-line model registry (pulled in via
+// ModelSelector) stays out of the initial bundle.
+const SettingsPanel = lazy(() =>
+  import('./components/SettingsPanel').then((m) => ({ default: m.SettingsPanel }))
+);
 
 const WAKE_MODE_KEY = 'ideario-wake-mode';
 const PAIRED_KEY = 'ideario-paired';
@@ -446,15 +451,17 @@ export default function App() {
           )}
 
           {activeTab === 'settings' && (
-            <SettingsPanel
-              theme={theme}
-              onToggleTheme={handleToggleTheme}
-              showDebug={showDebug}
-              onToggleDebug={handleToggleDebug}
-              selectedModelId={selectedModelId}
-              onModelChange={handleModelChange}
-              onResetAgents={handleResetAgents}
-            />
+            <Suspense fallback={null}>
+              <SettingsPanel
+                theme={theme}
+                onToggleTheme={handleToggleTheme}
+                showDebug={showDebug}
+                onToggleDebug={handleToggleDebug}
+                selectedModelId={selectedModelId}
+                onModelChange={handleModelChange}
+                onResetAgents={handleResetAgents}
+              />
+            </Suspense>
           )}
         </main>
 
