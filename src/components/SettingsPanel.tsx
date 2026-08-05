@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { ModelSelector } from './ModelSelector';
 import { ThemeSwitcher } from './ThemeSwitcher';
-import { getApiKey, setApiKey, getOllamaBaseUrl, setOllamaBaseUrl } from '../lib/providers';
+import { getApiKey, setApiKey, getOllamaBaseUrl, setOllamaBaseUrl, wipeKeysOnDevice } from '../lib/providers';
 import { getBridgeSession } from '../lib/bridge/session';
 import type { BridgeStatus } from '../lib/bridge/types';
 import { sendSettingsSync } from '../lib/settings-sync';
@@ -16,6 +16,7 @@ interface SettingsPanelProps {
   selectedModelId: string;
   onModelChange: (model: ModelInfo) => void;
   onResetAgents: () => void;
+  parked: boolean;
 }
 
 const GITHUB_TOKEN_KEY = 'ideario-github-token';
@@ -52,6 +53,7 @@ export function SettingsPanel({
   selectedModelId,
   onModelChange,
   onResetAgents,
+  parked,
 }: SettingsPanelProps) {
   const [orKey, setOrKey] = useState(() => getApiKey('openrouter') ?? '');
   const [showOrKey, setShowOrKey] = useState(false);
@@ -61,9 +63,11 @@ export function SettingsPanel({
   const [ghToken, setGhToken] = useState(loadGithubToken);
   const [showGhToken, setShowGhToken] = useState(false);
   const [confirmReset, setConfirmReset] = useState(false);
+  const [wipeArmed, setWipeArmed] = useState(false);
   const [bridgeStatus, setBridgeStatus] = useState<BridgeStatus>(() => getBridgeSession().getStatus());
   const [syncStatus, setSyncStatus] = useState<{ ok: boolean; text: string } | null>(null);
   const syncTimerRef = useRef<number | null>(null);
+  const wipeTimerRef = useRef<number | null>(null);
 
   // Live bridge rung for the settings-sync gate.
   useEffect(() => {
@@ -75,6 +79,7 @@ export function SettingsPanel({
   useEffect(() => {
     return () => {
       if (syncTimerRef.current !== null) window.clearTimeout(syncTimerRef.current);
+      if (wipeTimerRef.current !== null) window.clearTimeout(wipeTimerRef.current);
     };
   }, []);
 
@@ -96,6 +101,31 @@ export function SettingsPanel({
     setOrSaved(true);
     window.setTimeout(() => setOrSaved(false), 2000);
   }, [orKey]);
+
+  const handleWipeKeys = useCallback(() => {
+    if (!parked) return;
+    if (!wipeArmed) {
+      setWipeArmed(true);
+      if (wipeTimerRef.current !== null) window.clearTimeout(wipeTimerRef.current);
+      wipeTimerRef.current = window.setTimeout(() => setWipeArmed(false), 5000);
+      return;
+    }
+
+    wipeKeysOnDevice();
+    setOrKey('');
+    setGhToken('');
+    setShowOrKey(false);
+    setShowGhToken(false);
+    setOrSaved(false);
+    setWipeArmed(false);
+    if (wipeTimerRef.current !== null) {
+      window.clearTimeout(wipeTimerRef.current);
+      wipeTimerRef.current = null;
+    }
+    setSyncStatus({ ok: true, text: 'Keys wiped from this device.' });
+    if (syncTimerRef.current !== null) window.clearTimeout(syncTimerRef.current);
+    syncTimerRef.current = window.setTimeout(() => setSyncStatus(null), 4000);
+  }, [parked, wipeArmed]);
 
   const handleSaveOllama = useCallback(() => {
     setOllamaBaseUrl(ollamaUrl.trim() || 'http://localhost:11434');
@@ -120,6 +150,8 @@ export function SettingsPanel({
     'font-medium whitespace-nowrap transition-colors hover:border-ario-turquoise/50 ' +
     'focus:outline-none focus:ring-2 focus:ring-ario-turquoise/50';
 
+  const providerKeyCount = ['openrouter', 'ollama', 'nim'].filter((id) => getApiKey(id as any)).length;
+
   return (
     <div className="h-full overflow-y-auto chat-scroll">
       <div className="max-w-2xl mx-auto p-6 space-y-6">
@@ -132,31 +164,39 @@ export function SettingsPanel({
             Used by OpenRouter agents for chat. Stored only in this browser — never
             committed, never sent anywhere except openrouter.ai.
           </p>
-          <div className="flex gap-3">
-            <div className="relative flex-1">
-              <input
-                type={showOrKey ? 'text' : 'password'}
-                value={orKey}
-                onChange={(e) => setOrKey(e.target.value)}
-                placeholder="sk-or-..."
-                autoComplete="off"
-                className={inputClass}
-                style={{ userSelect: 'text', WebkitUserSelect: 'text' }}
-                aria-label="OpenRouter API key"
-              />
+          {parked ? (
+            <div className="flex gap-3">
+              <div className="relative flex-1">
+                <input
+                  type={showOrKey ? 'text' : 'password'}
+                  value={orKey}
+                  onChange={(e) => setOrKey(e.target.value)}
+                  placeholder="sk-or-..."
+                  autoComplete="off"
+                  className={inputClass}
+                  style={{ userSelect: 'text', WebkitUserSelect: 'text' }}
+                  aria-label="OpenRouter API key"
+                />
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowOrKey((v) => !v)}
+                className={smallButtonClass}
+                aria-label={showOrKey ? 'Hide API key' : 'Show API key'}
+              >
+                {showOrKey ? 'Hide' : 'Show'}
+              </button>
+              <button type="button" onClick={handleSaveOrKey} className={smallButtonClass}>
+                {orSaved ? 'Saved' : 'Save'}
+              </button>
             </div>
-            <button
-              type="button"
-              onClick={() => setShowOrKey((v) => !v)}
-              className={smallButtonClass}
-              aria-label={showOrKey ? 'Hide API key' : 'Show API key'}
-            >
-              {showOrKey ? 'Hide' : 'Show'}
-            </button>
-            <button type="button" onClick={handleSaveOrKey} className={smallButtonClass}>
-              {orSaved ? 'Saved' : 'Save'}
-            </button>
-          </div>
+          ) : (
+            <div className="rounded-2xl bg-amber-400/10 border border-amber-400/40 p-4 text-amber-200 text-sm">
+              {providerKeyCount > 0
+                ? `${providerKeyCount} key${providerKeyCount === 1 ? '' : 's'} stored — park to edit`
+                : 'Park to set provider keys.'}
+            </div>
+          )}
         </section>
 
         {/* Ollama */}
@@ -287,6 +327,27 @@ export function SettingsPanel({
               </span>
             )}
           </div>
+        </section>
+
+        {/* Wipe secret keys */}
+        <section className={sectionClass}>
+          <h3 className={headingClass}>Wipe keys on this device</h3>
+          <p className={hintClass}>
+            Remove only the provider keys and GitHub Gist token stored in this browser.
+            Preferences and saved ideas are not touched.
+          </p>
+          <button
+            type="button"
+            onClick={handleWipeKeys}
+            disabled={!parked}
+            className={`w-full min-h-14 rounded-2xl border text-sm font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-ario-turquoise/50
+                       ${parked
+                         ? 'bg-ario-red/10 border-ario-red/40 text-ario-red hover:bg-ario-red/15'
+                         : 'bg-amber-400/10 border-amber-400/40 text-amber-200 cursor-not-allowed'}`}
+            title={parked ? (wipeArmed ? 'Tap again to confirm wipe' : 'Wipe keys from this device') : 'Park to wipe keys'}
+          >
+            {wipeArmed ? 'Tap again to confirm wipe' : 'Wipe keys on this device'}
+          </button>
         </section>
 
         {/* Reset agents */}

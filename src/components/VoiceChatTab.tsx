@@ -6,6 +6,7 @@ interface VoiceChatTabProps {
   agents: AgentSpec[];
   /** Paired mode: passed through to ChatPanel (bigger type, Queue-link buttons). */
   paired: boolean;
+  parked: boolean;
   /** False while another tab is active (the tab stays mounted). */
   visible: boolean;
   // ---- voice bar state (owned by App's speech hooks) ----
@@ -59,6 +60,7 @@ function stateText(
 export function VoiceChatTab({
   agents,
   paired,
+  parked,
   visible,
   state,
   transcript,
@@ -149,6 +151,7 @@ export function VoiceChatTab({
         <ChatPanel
           agents={agents}
           paired={paired}
+          parked={parked}
           visible={visible}
           onSendReady={onSendReady}
           onReflexResponse={onReflexResponse}

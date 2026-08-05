@@ -22,6 +22,7 @@ interface ChatPanelProps {
   agents: AgentSpec[];
   /** Paired mode: URLs in agent bubbles render as "Queue link" buttons. */
   paired?: boolean;
+  parked: boolean;
   /**
    * Registration point for the Voice Chat tab: hands back a function that
    * pushes text through the normal send path (reflex lane FIRST, then
@@ -58,7 +59,7 @@ function loadActiveAgentId(agents: AgentSpec[]): string | null {
  * "Hey everyone, ...") via routePrompt + dispatchToAgents; quick-tap chips
  * inject the wake-word prefix; no wake word -> the active agent chip.
  */
-export function ChatPanel({ agents, paired, onSendReady, onReflexResponse, visible = true }: ChatPanelProps) {
+export function ChatPanel({ agents, paired, parked, onSendReady, onReflexResponse, visible = true }: ChatPanelProps) {
   const [entries, setEntries] = useState<ChatEntry[]>(loadChatLog);
   const [input, setInput] = useState('');
   const [activeAgentId, setActiveAgentId] = useState<string | null>(() => loadActiveAgentId(agents));
@@ -430,6 +431,7 @@ export function ChatPanel({ agents, paired, onSendReady, onReflexResponse, visib
               modelLabel={modelLabelFor(entry)}
               onRetry={handleRetry}
               paired={paired}
+              parked={parked}
             />
           ))
         )}
@@ -475,14 +477,14 @@ export function ChatPanel({ agents, paired, onSendReady, onReflexResponse, visib
         <button
           type="button"
           onClick={() => fileInputRef.current?.click()}
-          disabled={agents.length === 0}
+          disabled={!parked || agents.length === 0}
           className="min-h-14 min-w-14 flex-none flex items-center justify-center rounded-2xl
                      bg-ario-card border border-white/10 text-ario-muted
                      transition-all active:scale-95 hover:border-ario-turquoise/50 hover:text-ario-text
                      focus:outline-none focus:ring-2 focus:ring-ario-turquoise/50
                      disabled:opacity-40 disabled:cursor-not-allowed"
-          aria-label="Attach a .txt or .md file to the message"
-          title="Attach a .txt or .md file to the message"
+          aria-label={parked ? 'Attach a .txt or .md file to the message' : 'Park to attach a file'}
+          title={parked ? 'Attach a .txt or .md file to the message' : 'Park to attach a file'}
         >
           <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />

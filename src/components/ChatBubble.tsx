@@ -11,6 +11,8 @@ interface ChatBubbleProps {
   onRetry?: (entry: ChatEntry) => void;
   /** Paired mode: URLs in agent replies become "Queue link" buttons. */
   paired?: boolean;
+  /** Parked mode gates high-distraction expand affordances. */
+  parked?: boolean;
 }
 
 function formatTime(ts: number): string {
@@ -31,7 +33,7 @@ function formatTime(ts: number): string {
  * - system: centered, muted, small, no border (bridge / rate-limit notices)
  * - paired mode: URLs in agent replies render as "Queue link" buttons
  */
-export function ChatBubble({ entry, modelLabel, onRetry, paired }: ChatBubbleProps) {
+export function ChatBubble({ entry, modelLabel, onRetry, paired, parked }: ChatBubbleProps) {
   const [expanded, setExpanded] = useState(false);
   const [collapsible, setCollapsible] = useState(false);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -44,10 +46,6 @@ export function ChatBubble({ entry, modelLabel, onRetry, paired }: ChatBubblePro
     setCollapsible(el.scrollHeight > el.clientHeight + 2);
   }, [entry.content, entry.status]);
 
-  const toggle = useCallback(() => {
-    if (collapsible) setExpanded((prev) => !prev);
-  }, [collapsible]);
-
   const queueLink = useCallback((url: string) => {
     addToQueue(url);
     window.dispatchEvent(new Event(LINK_QUEUE_CHANGED_EVENT));
@@ -55,6 +53,10 @@ export function ChatBubble({ entry, modelLabel, onRetry, paired }: ChatBubblePro
 
   const isUser = entry.role === 'user';
   const time = formatTime(entry.ts);
+  const canExpand = collapsible && (!paired || parked);
+  const toggle = useCallback(() => {
+    if (canExpand) setExpanded((prev) => !prev);
+  }, [canExpand]);
 
   // Bridge / rate-limit notices: centered, muted, small, no border.
   if (entry.role === 'system') {
@@ -115,10 +117,10 @@ export function ChatBubble({ entry, modelLabel, onRetry, paired }: ChatBubblePro
           ) : (
             <div
               ref={contentRef}
-              onClick={toggle}
-              role={collapsible ? 'button' : undefined}
-              aria-expanded={collapsible ? expanded : undefined}
-              className={`relative ${collapsible && !expanded ? 'chat-collapsed cursor-pointer' : ''} ${collapsible ? 'cursor-pointer' : ''}`}
+              onClick={canExpand ? toggle : undefined}
+              role={canExpand ? 'button' : undefined}
+              aria-expanded={canExpand ? expanded : undefined}
+              className={`relative ${collapsible && !expanded ? 'chat-collapsed' : ''} ${canExpand ? 'cursor-pointer' : ''}`}
             >
               <p
                 className={`text-base leading-relaxed whitespace-pre-wrap break-words
@@ -149,7 +151,7 @@ export function ChatBubble({ entry, modelLabel, onRetry, paired }: ChatBubblePro
             </div>
           )}
 
-          {collapsible && !isThinking && (
+          {collapsible && !isThinking && canExpand && (
             <button
               type="button"
               onClick={toggle}

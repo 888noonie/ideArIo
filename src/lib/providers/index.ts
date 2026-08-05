@@ -47,6 +47,19 @@ export function setApiKey(id: ProviderId, key: string): void {
   }
 }
 
+const GITHUB_TOKEN_KEY = 'ideario-github-token';
+
+export function wipeKeysOnDevice(): void {
+  try {
+    for (const provider of allProviders()) {
+      window.localStorage.removeItem(keyStorageName(provider.id));
+    }
+    window.localStorage.removeItem(GITHUB_TOKEN_KEY);
+  } catch {
+    // Ignore localStorage errors.
+  }
+}
+
 // --- Ollama base URL ---------------------------------------------------------
 
 const OLLAMA_URL_KEY = 'ideario-ollama-url';
