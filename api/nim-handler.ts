@@ -29,6 +29,21 @@ export interface NimProxyResult {
 
 const NVIDIA_ENDPOINT = 'https://integrate.api.nvidia.com/v1/chat/completions';
 
+// F-25: Vercel caps this function at 10s (vercel.json maxDuration). We budget
+// the model-fallback loop so the TOTAL worst-case time stays under the cap
+// with margin for cold start, instead of 9 models x 6s each (which could be
+// killed mid-fallback, producing a raw platform timeout rather than Ario's
+// own honest {error, modelsTried} body).
+const TOTAL_BUDGET_MS = 8_000; // leave ~2s headroom inside the 10s cap
+const MAX_MODELS_TRIED = 4; // cap fallback depth
+const MIN_PER_MODEL_TIMEOUT_MS = 1_500; // don't starve a single attempt
+
+/** Per-model timeout so the whole fallback loop fits the budget. */
+function perModelTimeout(modelCount: number): number {
+  const n = Math.min(modelCount, MAX_MODELS_TRIED);
+  return Math.max(Math.floor(TOTAL_BUDGET_MS / n), MIN_PER_MODEL_TIMEOUT_MS);
+}
+
 // Default model cycle when no specific model is requested.
 // The order matters: try the fast, instruction-following models first
 // (structured YAML extraction), then heavier reasoning models.
@@ -61,7 +76,8 @@ async function callNIM(
   apiKey: string,
   systemPrompt: string,
   userPrompt: string,
-  model: string
+  model: string,
+  timeoutMs: number
 ): Promise<Response> {
   return fetchWithTimeout(
     NVIDIA_ENDPOINT,
@@ -84,8 +100,7 @@ async function callNIM(
         max_tokens: 2048,
       }),
     },
-    6000 // 6s per attempt — Vercel caps the function at 10s total,
-    // so the first model must answer fast or we fall through quickly
+    timeoutMs // budget-aware (F-25): scales with the fallback depth
   );
 }
 
@@ -117,15 +132,17 @@ export async function handleNimProxyRequest(
   const finalUserPrompt = userPrompt || transcript;
 
   // If client requested a specific model, try it first. Otherwise cycle the registry.
-  const modelsToTry = model
+  const modelsToTry = (model
     ? [model, ...DEFAULT_MODEL_CYCLE.filter((m) => m !== model)]
-    : DEFAULT_MODEL_CYCLE;
+    : DEFAULT_MODEL_CYCLE
+  ).slice(0, MAX_MODELS_TRIED);
 
+  const timeoutMs = perModelTimeout(modelsToTry.length);
   let lastError = 'Unknown error';
 
   for (const modelName of modelsToTry) {
     try {
-      const response = await callNIM(apiKey, finalSystemPrompt, finalUserPrompt, modelName);
+      const response = await callNIM(apiKey, finalSystemPrompt, finalUserPrompt, modelName, timeoutMs);
 
       if (!response.ok) {
         const errorText = await response.text();
@@ -153,7 +170,8 @@ export async function handleNimProxyRequest(
 function callNIMChat(
   apiKey: string,
   messages: NimChatMessage[],
-  model: string
+  model: string,
+  timeoutMs: number
 ): Promise<Response> {
   return fetchWithTimeout(
     NVIDIA_ENDPOINT,
@@ -170,7 +188,7 @@ function callNIMChat(
         max_tokens: 2048,
       }),
     },
-    6000 // same per-attempt budget as the legacy path (Vercel 10s cap)
+    timeoutMs // budget-aware (F-25)
   );
 }
 
@@ -191,15 +209,17 @@ async function handleChatCompletion(
     return { status: 400, body: { error: 'messages must be a non-empty array' } };
   }
 
-  const modelsToTry = model
+  const modelsToTry = (model
     ? [model, ...DEFAULT_MODEL_CYCLE.filter((m) => m !== model)]
-    : DEFAULT_MODEL_CYCLE;
+    : DEFAULT_MODEL_CYCLE
+  ).slice(0, MAX_MODELS_TRIED);
 
+  const timeoutMs = perModelTimeout(modelsToTry.length);
   let lastError = 'Unknown error';
 
   for (const modelName of modelsToTry) {
     try {
-      const response = await callNIMChat(apiKey, valid, modelName);
+      const response = await callNIMChat(apiKey, valid, modelName, timeoutMs);
 
       if (!response.ok) {
         lastError = await response.text();
