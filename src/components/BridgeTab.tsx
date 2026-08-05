@@ -271,6 +271,14 @@ export function BridgeTab({ paired, onPairedChange }: BridgeTabProps) {
             </span>
           </div>
 
+          {/* F-08: honest "still trying to upgrade" surface instead of a
+              silent indefinite re-probe loop. */}
+          {status.upgrading && status.rung === 'mailbox' && (
+            <p className="mt-3 text-ario-muted text-sm" role="status">
+              Still trying to upgrade to a direct connection…
+            </p>
+          )}
+
           <button
             type="button"
             onClick={handleStop}

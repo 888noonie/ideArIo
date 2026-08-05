@@ -35,6 +35,13 @@ const SILENCE_TIMEOUT_MS = 20_000;
 const OUTBOUND_BUFFER_MAX = 20;
 const SEEN_IDS_MAX = 500;
 
+// WebRTC re-offer backoff (F-08): the hub re-probes every REPROBE_MS while
+// stuck on the mailbox rung, but after a few consecutive failed upgrades it
+// backs off exponentially up to REPROBE_BACKOFF_MAX_MS so a restrictive
+// carrier NAT can't cause runaway RTCPeerConnection churn forever.
+const REPROBE_FAILURES_BEFORE_BACKOFF = 2;
+const REPROBE_BACKOFF_MAX_MS = 300_000; // 5 min cap
+
 const RTC_CONFIG: RTCConfiguration = {
   iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
 };
@@ -64,9 +71,14 @@ class BridgeSessionImpl implements BridgeSession {
   private dc: RTCDataChannel | null = null;
 
   private pollTimer: ReturnType<typeof setTimeout> | null = null;
-  private reprobeTimer: ReturnType<typeof setInterval> | null = null;
+  private reprobeTimer: ReturnType<typeof setTimeout> | null = null;
   private pingTimer: ReturnType<typeof setInterval> | null = null;
   private silenceTimer: ReturnType<typeof setInterval> | null = null;
+
+  // WebRTC re-probe backoff state (F-08).
+  private reprobeFailures = 0;
+  private nextReprobeInMs = 0;
+  private upgrading = false;
 
   private seenIds = new Set<string>();
   private outboundBuffer: BridgeEnvelope[] = [];
@@ -85,7 +97,7 @@ class BridgeSessionImpl implements BridgeSession {
     this.emitStatus();
 
     this.schedulePoll(MAILBOX_POLL_MS);
-    this.reprobeTimer = setInterval(() => this.reprobe(), REPROBE_MS);
+    this.scheduleReprobe(REPROBE_MS);
     this.pingTimer = setInterval(() => this.sendPing(), PING_MS);
     this.silenceTimer = setInterval(() => this.checkSilence(), SILENCE_CHECK_MS);
 
@@ -97,13 +109,16 @@ class BridgeSessionImpl implements BridgeSession {
 
   stop(): void {
     if (this.pollTimer !== null) clearTimeout(this.pollTimer);
-    if (this.reprobeTimer !== null) clearInterval(this.reprobeTimer);
+    if (this.reprobeTimer !== null) clearTimeout(this.reprobeTimer);
     if (this.pingTimer !== null) clearInterval(this.pingTimer);
     if (this.silenceTimer !== null) clearInterval(this.silenceTimer);
     this.pollTimer = null;
     this.reprobeTimer = null;
     this.pingTimer = null;
     this.silenceTimer = null;
+    this.reprobeFailures = 0;
+    this.nextReprobeInMs = 0;
+    this.upgrading = false;
 
     this.teardownPeer();
 
@@ -156,6 +171,8 @@ class BridgeSessionImpl implements BridgeSession {
       connected: this.connected,
       code: this.code,
       lastPeerSeen: this.lastPeerSeen,
+      upgrading: this.upgrading,
+      nextReprobeInMs: this.nextReprobeInMs,
     };
   }
 
@@ -271,6 +288,8 @@ class BridgeSessionImpl implements BridgeSession {
         .then((offer) => this.pc!.setLocalDescription(offer))
         .then(() => {
           if (this.pc?.localDescription) {
+            this.upgrading = true;
+            this.emitStatus();
             this.sendSignal({ sdp: this.pc.localDescription.toJSON() });
           }
         })
@@ -284,8 +303,53 @@ class BridgeSessionImpl implements BridgeSession {
   /** Silent re-probe: hub re-offers only while still on the mailbox rung. */
   private reprobe(): void {
     if (this.role === 'hub' && this.rung === 'mailbox') {
+      // If the previous offer never upgraded to WebRTC, count it as a
+      // failure and back off (F-08) before sending a fresh offer.
+      if (this.upgrading) {
+        this.noteReprobeFailure();
+      } else {
+        this.scheduleReprobe(REPROBE_MS);
+      }
       this.startOffer();
     }
+  }
+
+  /**
+   * Schedule the next WebRTC re-probe with exponential backoff (F-08).
+   * After REPROBE_FAILURES_BEFORE_BACKOFF consecutive failed upgrades the
+   * delay doubles each time, capped at REPROBE_BACKOFF_MAX_MS. A successful
+   * upgrade (rung -> webrtc) resets the counter via resetReprobeBackoff().
+   */
+  private scheduleReprobe(delayMs: number): void {
+    if (this.reprobeTimer !== null) clearTimeout(this.reprobeTimer);
+    this.nextReprobeInMs = delayMs;
+    this.reprobeTimer = setTimeout(() => {
+      this.reprobeTimer = null;
+      this.reprobe();
+    }, delayMs);
+    this.emitStatus();
+  }
+
+  /** Called when an upgrade attempt fails (offer sent, no answer/DC). */
+  private noteReprobeFailure(): void {
+    this.reprobeFailures += 1;
+    const backoff =
+      this.reprobeFailures > REPROBE_FAILURES_BEFORE_BACKOFF
+        ? Math.min(REPROBE_MS * 2 ** (this.reprobeFailures - REPROBE_FAILURES_BEFORE_BACKOFF), REPROBE_BACKOFF_MAX_MS)
+        : REPROBE_MS;
+    this.scheduleReprobe(backoff);
+  }
+
+  /** Called when the DataChannel opens — the upgrade succeeded. */
+  private resetReprobeBackoff(): void {
+    this.reprobeFailures = 0;
+    this.upgrading = false;
+    if (this.reprobeTimer !== null) {
+      clearTimeout(this.reprobeTimer);
+      this.reprobeTimer = null;
+    }
+    this.nextReprobeInMs = 0;
+    this.emitStatus();
   }
 
   private wirePeerConnection(): void {
@@ -303,6 +367,7 @@ class BridgeSessionImpl implements BridgeSession {
     channel.onopen = () => {
       this.rung = 'webrtc';
       this.schedulePoll(KEEPALIVE_POLL_MS); // mailbox drops to 30s keepalive
+      this.resetReprobeBackoff();
       this.notePeerSeen();
       this.emitStatus();
     };

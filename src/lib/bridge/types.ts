@@ -21,6 +21,10 @@ export interface BridgeStatus {
   connected: boolean;
   code: string | null;
   lastPeerSeen: number | null;
+  /** True while the hub is actively trying to upgrade mailbox -> WebRTC. */
+  upgrading?: boolean;
+  /** Milliseconds until the next WebRTC re-probe (0 when not scheduled). */
+  nextReprobeInMs?: number;
 }
 
 /** WebRTC signalling payload carried inside 'signal' envelopes. */
