@@ -23,7 +23,7 @@ Three providers are supported:
 2. **OpenRouter** — key entered in Settings, stored in `localStorage`, called directly from the browser.
 3. **Ollama** — local models; set the base URL in Settings (default `http://localhost:11434`). No key required.
 
-Optional: `VITE_GITHUB_TOKEN` at build time seeds a GitHub token for Gist sync. A token entered in Settings takes precedence; the env var is only a fallback.
+Optional: a GitHub token may be entered in Settings for Gist sync. The app stores it only in this browser and never bundles it.
 
 ## Develop
 

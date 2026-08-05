@@ -400,6 +400,9 @@ class BridgeSessionImpl implements BridgeSession {
       this.deriveSas().then((sas) => {
         this.sas = sas;
         this.emitStatus();
+      }).catch(() => {
+        this.sas = null;
+        this.emitStatus();
       });
       this.emitStatus();
     };
