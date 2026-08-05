@@ -8,7 +8,9 @@ import { LINK_QUEUE_CHANGED_EVENT, TRUST_CHANGED_EVENT } from './reflex-helpers'
 
 interface BridgeTabProps {
   paired: boolean;
+  parked: boolean;
   onPairedChange: (on: boolean) => void;
+  onParkedChange: (on: boolean) => void;
 }
 
 type RoleChoice = 'off' | BridgeRole;
@@ -42,7 +44,7 @@ function lastSeenLabel(lastPeerSeen: number | null, now: number): string {
  * watch the transport ladder status, and tune trust / crew audio / paired
  * mode / the eyes-free link queue.
  */
-export function BridgeTab({ paired, onPairedChange }: BridgeTabProps) {
+export function BridgeTab({ paired, parked, onPairedChange, onParkedChange }: BridgeTabProps) {
   const session = getBridgeSession();
   const [status, setStatus] = useState<BridgeStatus>(() => session.getStatus());
   const [roleChoice, setRoleChoice] = useState<RoleChoice>(() => session.getStatus().role ?? 'off');
@@ -93,6 +95,10 @@ export function BridgeTab({ paired, onPairedChange }: BridgeTabProps) {
       sessionRef.current.stop();
     }
   }, []);
+
+  const handleParkedToggle = useCallback(() => {
+    onParkedChange(!parked);
+  }, [onParkedChange, parked]);
 
   const handleGenerateCode = useCallback(async () => {
     setStarting(true);
@@ -166,6 +172,27 @@ export function BridgeTab({ paired, onPairedChange }: BridgeTabProps) {
 
   return (
     <div className="h-full min-h-0 overflow-y-auto chat-scroll overscroll-contain px-4 py-4 space-y-4">
+      <section className="ario-panel p-4" aria-label="Drive state">
+        <button
+          type="button"
+          onClick={handleParkedToggle}
+          className={`w-full min-h-[72px] rounded-3xl border px-4 py-4 text-left text-sm font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-ario-turquoise/50
+            ${parked ? 'bg-ario-turquoise/15 border-ario-turquoise/50 text-ario-text' : 'bg-amber-400/10 border-amber-400/40 text-amber-200'}`}
+        >
+          <div className="flex items-center gap-3">
+            <span className="text-xl">{parked ? '🅿️' : '🚗'}</span>
+            <div className="min-w-0">
+              <div className="truncate">
+                {parked ? 'Parked — all actions available' : 'Driving — high-distraction actions locked'}
+              </div>
+              <div className="text-ario-muted text-xs mt-1">
+                Tap to switch to {parked ? 'Driving' : 'Parked'}.
+              </div>
+            </div>
+          </div>
+        </button>
+      </section>
+
       {/* Role picker */}
       <section className="ario-panel p-4" aria-label="Bridge role">
         <h2 className="text-ario-text text-lg font-semibold mb-1">Bridge</h2>
@@ -201,13 +228,12 @@ export function BridgeTab({ paired, onPairedChange }: BridgeTabProps) {
           <button
             type="button"
             onClick={handleGenerateCode}
-            disabled={starting}
-            className="mt-3 w-full min-h-14 rounded-2xl bg-ario-turquoise/15 border border-ario-turquoise/50
-                       text-ario-turquoise text-base font-semibold transition-all active:scale-95
-                       hover:bg-ario-turquoise/25 focus:outline-none focus:ring-2 focus:ring-ario-turquoise/50
-                       disabled:opacity-40"
+            disabled={!parked || starting}
+            className="mt-3 w-full min-h-14 rounded-2xl border text-base font-semibold transition-all active:scale-95 focus:outline-none focus:ring-2 focus:ring-ario-turquoise/50
+                       ${parked ? 'bg-ario-turquoise/15 border-ario-turquoise/50 text-ario-turquoise hover:bg-ario-turquoise/25' : 'bg-amber-400/10 border-amber-400/50 text-amber-200 cursor-not-allowed'}"
+            title={parked ? (starting ? 'Starting…' : 'Generate code') : 'Park to pair a new device'}
           >
-            {starting ? 'Starting...' : 'Generate code'}
+            {parked ? (starting ? 'Starting...' : 'Generate code') : 'Park to pair'}
           </button>
         )}
 
@@ -220,21 +246,21 @@ export function BridgeTab({ paired, onPairedChange }: BridgeTabProps) {
               maxLength={6}
               defaultValue=""
               onInput={(e) => setJoinCode(e.currentTarget.value.replace(/\D/g, ''))}
-              placeholder="6-digit code"
+              placeholder={parked ? '6-digit code' : 'Park to pair a new device'}
               aria-label="6-digit pairing code"
+              disabled={!parked}
               className="flex-1 min-h-14 px-5 rounded-2xl bg-ario-card text-ario-text text-xl tracking-[0.4em]
                          text-center border border-white/10 placeholder:text-ario-muted/50 placeholder:text-base placeholder:tracking-normal
-                         focus:outline-none focus:ring-2 focus:ring-ario-turquoise/50"
+                         focus:outline-none focus:ring-2 focus:ring-ario-turquoise/50 disabled:opacity-50"
               style={{ userSelect: 'text', WebkitUserSelect: 'text' }}
             />
             <button
               type="button"
               onClick={handleJoin}
-              disabled={starting || joinCode.length !== 6}
-              className="min-h-14 px-6 rounded-2xl bg-ario-turquoise/15 border border-ario-turquoise/50
-                         text-ario-turquoise text-base font-semibold transition-all active:scale-95
-                         hover:bg-ario-turquoise/25 focus:outline-none focus:ring-2 focus:ring-ario-turquoise/50
-                         disabled:opacity-40"
+              disabled={!parked || starting || joinCode.length !== 6}
+              className="min-h-14 px-6 rounded-2xl transition-all active:scale-95 focus:outline-none focus:ring-2 focus:ring-ario-turquoise/50
+                         ${parked ? 'bg-ario-turquoise/15 border border-ario-turquoise/50 text-ario-turquoise hover:bg-ario-turquoise/25' : 'bg-amber-400/10 border border-amber-400/50 text-amber-200 cursor-not-allowed'}"
+              title={parked ? 'Join using the code' : 'Park to pair a new device'}
             >
               Join
             </button>

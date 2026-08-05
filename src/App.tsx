@@ -7,6 +7,7 @@ import { IdeasTab } from './components/IdeasTab';
 import { HistoryTab } from './components/HistoryTab';
 import { BridgeTab } from './components/BridgeTab';
 import { AgentManager } from './components/AgentManager';
+import { FirstRunConsent } from './components/FirstRunConsent';
 import { useSpeechRecognition } from './hooks/useSpeechRecognition';
 import { useSpeechSynthesis } from './hooks/useSpeechSynthesis';
 import { useWakeWord } from './hooks/useWakeWord';
@@ -21,8 +22,10 @@ import {
 import { loadTheme, saveTheme, applyTheme, type Theme } from './lib/theme';
 import { loadAgents, saveAgents, DEFAULT_AGENTS, type AgentSpec } from './lib/agents';
 import { CHAT_SYSTEM_ENTRY_EVENT } from './lib/chat-engine';
+import { getBridgeSession } from './lib/bridge/session';
 import { initSettingsSyncListener, takePendingSettings, type SyncedSettings } from './lib/settings-sync';
 import { SettingsSyncPrompt } from './components/SettingsSyncPrompt';
+import { isParked, persistParked } from './lib/drive-state';
 import type { ArioState, IdearioYAML, SavedIdeario } from './types/ideario';
 import type { ModelInfo } from './lib/model-registry';
 
@@ -34,6 +37,7 @@ const SettingsPanel = lazy(() =>
 
 const WAKE_MODE_KEY = 'ideario-wake-mode';
 const PAIRED_KEY = 'ideario-paired';
+const FIRST_RUN_KEY = 'ideario-first-run-done';
 
 function loadWakeMode(): boolean {
   try {
@@ -51,6 +55,22 @@ function loadPaired(): boolean {
   }
 }
 
+function loadFirstRunDone(): boolean {
+  try {
+    return localStorage.getItem(FIRST_RUN_KEY) === 'true';
+  } catch {
+    return false;
+  }
+}
+
+function saveFirstRunDone(): void {
+  try {
+    localStorage.setItem(FIRST_RUN_KEY, 'true');
+  } catch {
+    // Ignore storage errors.
+  }
+}
+
 export default function App() {
   const [activeTab, setActiveTab] = useState<TabId>('voice');
   const [arioState, setArioState] = useState<ArioState>('idle');
@@ -63,7 +83,10 @@ export default function App() {
   const [theme, setTheme] = useState<Theme>(loadTheme);
   const [showDebug, setShowDebug] = useState(false);
   const [agents, setAgents] = useState<AgentSpec[]>(loadAgents);
+  const [parked, setParked] = useState<boolean>(isParked);
   const [paired, setPaired] = useState<boolean>(loadPaired);
+  const [bridgeRung, setBridgeRung] = useState(getBridgeSession().getStatus().rung);
+  const [firstRunDone, setFirstRunDone] = useState(loadFirstRunDone);
   const [pendingSync, setPendingSync] = useState<SyncedSettings | null>(null);
 
   // The Voice Chat tab registers ChatPanel's send path here; finalized
@@ -82,6 +105,22 @@ export default function App() {
       // Ignore localStorage errors
     }
   }, [paired]);
+
+  useEffect(() => {
+    const session = getBridgeSession();
+    session.onStatus((status) => setBridgeRung(status.rung));
+    setBridgeRung(session.getStatus().rung);
+  }, []);
+
+  const handleParkedChange = useCallback((next: boolean) => {
+    persistParked(next);
+    setParked(next);
+  }, []);
+
+  const handleDismissFirstRun = useCallback(() => {
+    saveFirstRunDone();
+    setFirstRunDone(true);
+  }, []);
 
   // Lock the shell height ONCE on load: the AA WebView fires viewport
   // resize jitter (keyboard, browser chrome) that used to bounce the
@@ -442,17 +481,14 @@ export default function App() {
           synced={allSynced && syncStatus === 'synced'}
           ideaCount={savedIdeas.length}
           paired={paired}
+          bridgeRung={bridgeRung}
         />
-
-        {/* Active tab view — each tab owns the full content area */}
         <main className="flex-1 min-h-0">
-          {/* Voice Chat stays mounted (hidden when another tab is active)
-              so the voice/wake-word send path and bridge subscriptions
-              never drop mid-session. */}
           <div className={activeTab === 'voice' ? 'h-full min-h-0' : 'hidden'}>
             <VoiceChatTab
               agents={agents}
               paired={paired}
+              parked={parked}
               visible={activeTab === 'voice'}
               state={arioState}
               transcript={transcript}
@@ -478,7 +514,12 @@ export default function App() {
           )}
 
           {activeTab === 'bridge' && (
-            <BridgeTab paired={paired} onPairedChange={setPaired} />
+            <BridgeTab
+              paired={paired}
+              parked={parked}
+              onPairedChange={setPaired}
+              onParkedChange={handleParkedChange}
+            />
           )}
 
           {activeTab === 'history' && (
@@ -495,6 +536,7 @@ export default function App() {
                 selectedModelId={selectedModelId}
                 onModelChange={handleModelChange}
                 onResetAgents={handleResetAgents}
+                parked={parked}
               />
             </Suspense>
           )}
@@ -505,6 +547,8 @@ export default function App() {
       </div>
 
       {showDebug && <DebugOverlay onClose={handleToggleDebug} />}
+
+      {!firstRunDone && <FirstRunConsent onAcknowledge={handleDismissFirstRun} />}
 
       {pendingSync && (
         <SettingsSyncPrompt
