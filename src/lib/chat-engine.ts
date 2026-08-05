@@ -13,6 +13,8 @@ export interface ChatEntry {
   content: string;
   status: 'done' | 'thinking' | 'error';
   ts: number;
+  /** True for entries received over the bridge mailbox (display role). */
+  remote?: boolean;
 }
 
 const STORAGE_KEY = 'ideario-chat-log';

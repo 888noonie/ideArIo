@@ -193,7 +193,9 @@ export function ChatPanel({ agents, paired, onSendReady, onReflexResponse, visib
     setEntries((prev) => {
       const byId = new Map(prev.map((e) => [e.id, e] as const));
       for (const e of incoming) {
-        if (e && typeof e.id === 'string') byId.set(e.id, e);
+        if (e && typeof e.id === 'string') {
+          byId.set(e.id, { ...e, remote: true });
+        }
       }
       return [...byId.values()].sort((a, b) => a.ts - b.ts);
     });

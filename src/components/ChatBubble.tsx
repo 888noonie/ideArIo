@@ -85,7 +85,7 @@ export function ChatBubble({ entry, modelLabel, onRetry, paired }: ChatBubblePro
   const accent = entry.color ?? '#00f5d4';
   const isThinking = entry.status === 'thinking';
   const isError = entry.status === 'error';
-  const urls = paired && !isThinking ? extractUrls(entry.content) : [];
+  const urls = paired && !isThinking && !entry.remote ? extractUrls(entry.content) : [];
 
   return (
     <div className="flex justify-start px-4 py-1.5">
