@@ -70,8 +70,10 @@ function slugify(title: string): string {
 
 /**
  * Minimal Gist save for reflex saves — mirrors gist-client's POST shape but
- * resolves the token from localStorage 'ideario-github-token' FIRST, then the
- * env (matching the bridge mailbox). Deliberately does NOT touch gist-client.
+ * resolves the token from localStorage 'ideario-github-token' only (matching
+ * the bridge mailbox). The build-time env fallback was removed (S-04) — a
+ * VITE_ var would be inlined into the client bundle. Deliberately does NOT
+ * touch gist-client.
  */
 export async function saveExchangeToGist(saved: SavedIdeario): Promise<void> {
   let token: string | null = null;
@@ -80,7 +82,6 @@ export async function saveExchangeToGist(saved: SavedIdeario): Promise<void> {
   } catch {
     token = null;
   }
-  token = token || import.meta.env.VITE_GITHUB_TOKEN || null;
   if (!token) return;
 
   const filename = `${slugify(saved.title)}-${saved.id}.yaml`;

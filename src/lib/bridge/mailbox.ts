@@ -11,8 +11,9 @@
  * ordering). poll() returns only envelopes newer than the caller's
  * last-seen watermark, tracked inside the Mailbox.
  *
- * Token resolution: localStorage 'ideario-github-token' FIRST, then
- * import.meta.env.VITE_GITHUB_TOKEN.
+ * Token resolution: localStorage 'ideario-github-token' only. The build-time
+ * env fallback was removed (S-04) — a VITE_ var would be inlined into the
+ * client bundle and exposed to every visitor.
  */
 
 import type { BridgeEnvelope } from './types';
@@ -54,10 +55,9 @@ function resolveToken(): string | null {
     const stored = window.localStorage.getItem(TOKEN_KEY);
     if (stored && stored.trim()) return stored.trim();
   } catch {
-    // storage unavailable — fall through to env
+    // storage unavailable — no token available
   }
-  const envToken = import.meta.env.VITE_GITHUB_TOKEN as string | undefined;
-  return envToken && envToken.trim() ? envToken.trim() : null;
+  return null;
 }
 
 function headers(token: string): Record<string, string> {

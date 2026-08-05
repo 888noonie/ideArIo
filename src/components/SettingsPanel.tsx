@@ -200,8 +200,8 @@ export function SettingsPanel({
         <section className={sectionClass}>
           <h3 className={headingClass}>GitHub Gist token (optional)</h3>
           <p className={hintClass}>
-            Enables syncing ideas to a GitHub Gist. This field takes precedence; the
-            VITE_GITHUB_TOKEN env var (if set at build time) is used only as a fallback.
+            Enables syncing ideas to a GitHub Gist. The token is stored in this
+            browser only and is never bundled into the app.
           </p>
           <div className="flex gap-3">
             <input

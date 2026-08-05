@@ -17,18 +17,17 @@ export interface GistCreatePayload {
 
 const TOKEN_KEY = 'ideario-github-token';
 
-// Token resolution order matches bridge/mailbox.ts and reflex-helpers.ts:
-// the Settings-entered token (localStorage) wins; the build-time env var is
-// the fallback, never an override.
+// Token resolution matches bridge/mailbox.ts and reflex-helpers.ts:
+// the Settings-entered token (localStorage) only. The build-time env fallback
+// was removed (S-04) — a VITE_ var would be inlined into the client bundle.
 function getToken(): string | null {
   try {
     const stored = window.localStorage.getItem(TOKEN_KEY);
     if (stored && stored.trim()) return stored.trim();
   } catch {
-    // storage unavailable — fall through to env
+    // storage unavailable — no token available
   }
-  const envToken = import.meta.env.VITE_GITHUB_TOKEN as string | undefined;
-  return envToken && envToken.trim() ? envToken.trim() : null;
+  return null;
 }
 
 function headers(token: string): Record<string, string> {
