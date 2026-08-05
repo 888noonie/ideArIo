@@ -107,9 +107,49 @@ export function ChatPanel({ agents, paired, onSendReady, onReflexResponse, visib
   }, [activeAgentId]);
 
   // Persist the log (thinking placeholders are dropped on reload).
+  // F-14: debounced — the save effect used to fire on EVERY entries change,
+  // including every 'thinking' -> 'done' transition per agent per broadcast,
+  // re-serializing the full array to localStorage on the main thread each
+  // step. Now we only persist after a short idle window, and we skip the
+  // write entirely when the only change was a 'thinking' placeholder.
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastPersistedRef = useRef<string>('');
+  const pendingEntriesRef = useRef<ChatEntry[]>([]);
   useEffect(() => {
-    saveChatLog(entries.filter((e) => e.status !== 'thinking'));
+    const doneEntries = entries.filter((e) => e.status !== 'thinking');
+    const snapshot = JSON.stringify(doneEntries);
+    // Skip the write when nothing durable changed (e.g. only a thinking
+    // placeholder was added/updated).
+    if (snapshot === lastPersistedRef.current) return;
+
+    pendingEntriesRef.current = doneEntries;
+    if (saveTimerRef.current !== null) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(() => {
+      saveChatLog(pendingEntriesRef.current);
+      lastPersistedRef.current = snapshot;
+      saveTimerRef.current = null;
+    }, 400);
+    return () => {
+      if (saveTimerRef.current !== null) clearTimeout(saveTimerRef.current);
+    };
   }, [entries]);
+
+  // F-14: flush any pending debounced save on unmount so the last few
+  // entries aren't lost if the component unmounts mid-debounce.
+  useEffect(() => {
+    return () => {
+      if (saveTimerRef.current !== null) {
+        clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = null;
+        const pending = pendingEntriesRef.current;
+        const snapshot = JSON.stringify(pending);
+        if (snapshot !== lastPersistedRef.current) {
+          saveChatLog(pending);
+          lastPersistedRef.current = snapshot;
+        }
+      }
+    };
+  }, []);
 
   // Auto-scroll to the newest message. Paired mode (car display) jumps
   // instantly — smooth scrolling reads as viewport jitter there. Also
