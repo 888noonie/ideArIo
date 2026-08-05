@@ -4,7 +4,7 @@
  * headset buttons) can pause/stop/skip the crew's voice. Disabled by
  * default — the crew never speaks until the user opts in.
  */
-
+import { loadSpeechSettings } from './speech-settings';
 const ENABLED_KEY = 'ideario-crew-audio';
 const CHUNK_MAX = 200;
 
@@ -82,16 +82,16 @@ function chunkSentences(text: string): string[] {
 }
 
 /** Speak the next queued reply (if any). Called when the queue is idle. */
-function pumpQueue(): void {
+function pumpQueue(settings?: { rate?: number }): void {
   if (queueActive) return;
   const next = replyQueue.shift();
   if (next === undefined) return;
   queueActive = true;
 
-  const chunks = chunkSentences(next);
+  const chunks = chunkSentences(next).slice(0, 3);
   if (chunks.length === 0) {
     queueActive = false;
-    pumpQueue();
+    pumpQueue(settings);
     return;
   }
 
@@ -101,15 +101,15 @@ function pumpQueue(): void {
     // queue to the next reply (or marks the queue idle).
     chunks.forEach((chunk, i) => {
       const utterance = new SpeechSynthesisUtterance(chunk);
-      utterance.rate = 1.0;
+      utterance.rate = settings?.rate ?? 1.0;
       if (i === chunks.length - 1) {
         utterance.onend = () => {
           queueActive = false;
-          pumpQueue();
+          pumpQueue(settings);
         };
         utterance.onerror = () => {
           queueActive = false;
-          pumpQueue();
+          pumpQueue(settings);
         };
       }
       synth.speak(utterance);
@@ -117,7 +117,7 @@ function pumpQueue(): void {
   } catch {
     // speech unavailable — fail silently, move on
     queueActive = false;
-    pumpQueue();
+    pumpQueue(settings);
   }
 }
 
@@ -128,9 +128,10 @@ export function speakAgentReply(text: string): void {
   const trimmed = text.trim();
   if (!trimmed) return;
 
+  const settings = loadSpeechSettings();
   lastReply = trimmed;
   replyQueue.push(trimmed);
-  pumpQueue();
+  pumpQueue(settings);
 }
 
 /**

@@ -98,4 +98,5 @@ export type ArioCue =
   | 'synced'
   | 'offline'
   | 'online'
-  | 'wake';
+  | 'wake'
+  | 'confirm';

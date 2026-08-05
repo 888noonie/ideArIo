@@ -113,7 +113,11 @@ async function runAgent(
   onUpdate(base);
 
   const messages: ChatMessage[] = [
-    { role: 'system', content: agent.systemPrompt },
+    {
+      role: 'system',
+      content:
+        `${agent.systemPrompt}\nYou are in a car. Never tell the driver to look at the screen or act urgently; keep spoken replies to 1–2 sentences.`,
+    },
     ...buildHistoryMessages(agent, history),
     { role: 'user', content: routed.cleanPrompt },
   ];

@@ -84,3 +84,42 @@ cargo-culted — preserve them in any change.
 - `api/nim-handler.ts` — shared NIM proxy logic (Vercel + dev middleware)
 - `public/sw.js` — service worker (cache keys tied to git SHA via `vite.config.ts`)
 - `DOCS/BRIDGE.md`, `DOCS/PROVIDERS.md` — deeper docs; root README links to them
+
+## API credentials (`/home/richardn/API`)
+
+Richard keeps all API keys in a **separate folder outside this repo**:
+`/home/richardn/API`. It is NOT part of the ideArIo git repo and must never be.
+
+### Handling rules (non-negotiable)
+
+1. **Never commit** anything from `/home/richardn/API` into any repo. A
+   `.gitignore` guard exists there, but treat it as a last resort — the real
+   rule is: don't add those files to git at all.
+2. **Never paste a full key** into a chat, issue, error report, commit message,
+   or any log. If a key appears in output, redact it (e.g. `sk-or-...a5a06`).
+3. **Full keys live only in the per-service files** (e.g. `OpenRouter-API.md`).
+   The `API-MASTER-REFERENCE.md` is intentionally **redacted** — prefer pointing
+   at it when a key reference is needed in discussion.
+4. **Rotate on exposure.** If a key leaks, tell Richard immediately so he can
+   rotate it in the provider dashboard.
+5. **Testing costs money.** PAYG providers (OfoxAI, OpenRouter, NVIDIA, KIMI)
+   bill per token. Only fire test requests with Richard's sign-off, and use the
+   cheapest model available. Free-tier services (GitHub, Unsplash, Spotify,
+   Giphy) are safe to test freely.
+6. **Status discipline.** When a key is tested, record the result + date in the
+   per-service file and refresh the master reference. Don't leave stale statuses.
+
+### File map
+
+- `API-MASTER-REFERENCE.md` — redacted index of all services (safe to reference)
+- `README.md` — folder overview + maintenance workflow
+- `*.md` per-service files — full keys, base URLs, auth, quick-test curls
+- `.gitignore` — guards the folder against accidental commits
+
+### Provider notes for ideArIo
+
+- The app's BYOK providers (OpenRouter, Ollama, NVIDIA NIM) map to keys in this
+  folder. The **server-key boundary** invariant (see above) still governs: keys
+  never enter the client bundle or the Gist mailbox — only WebRTC settings-sync.
+- `NVIDIA_API_KEY` for the NIM proxy lives server-side; the key in
+  `/home/richardn/API/NVIDIA-NIM-API.md` is the source of truth for it.

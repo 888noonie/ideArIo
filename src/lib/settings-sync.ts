@@ -84,13 +84,26 @@ export function sendSettingsSync(): { sent: boolean; reason?: string } {
  */
 let pendingSettings: SyncedSettings | null = null;
 
+function isSyncedSettings(value: unknown): value is SyncedSettings {
+  if (!value || typeof value !== 'object') return false;
+  const s = value as Record<string, unknown>;
+  if (typeof s.ollamaBaseUrl !== 'string') return false;
+  if (s.theme !== 'light' && s.theme !== 'dark') return false;
+  if (typeof s.selectedModelId !== 'string') return false;
+  if (!Array.isArray(s.agents)) return false;
+  if (typeof s.providerKeys !== 'object' || s.providerKeys === null) return false;
+  return Object.values(s.providerKeys as Record<string, unknown>).every(
+    (v) => typeof v === 'string'
+  );
+}
+
 export function initSettingsSyncListener(onPending: (s: SyncedSettings) => void): void {
   const session = getBridgeSession();
   session.onMessage((env) => {
     if (env.type !== 'state') return;
     if (session.getStatus().role !== 'display') return;
     const payload = env.payload as SettingsSyncPayload | null;
-    if (payload?.kind === 'settings-sync' && payload.settings) {
+    if (payload?.kind === 'settings-sync' && payload.settings && isSyncedSettings(payload.settings)) {
       pendingSettings = payload.settings;
       onPending(payload.settings); // UI shows a prompt; nothing is written yet
     }

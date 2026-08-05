@@ -7,6 +7,7 @@ const WAKE_REGEX = /(?:^|\s)hey[\s,]+ario\b[\s,:-]*|(?:^|\s)ario\b[\s,:-]*/i;
 const SILENCE_PAUSE_MS = 30_000;
 /** After hearing just "Ario", wait this long for the command sentence. */
 const WAKE_WINDOW_MS = 4_000;
+const MIN_COMMAND_LENGTH = 4;
 /** Delay before auto-restarting recognition after the OS kills it. */
 const RESTART_DELAY_MS = 350;
 /** Stop auto-restarting after this many consecutive fatal errors. */
@@ -19,6 +20,8 @@ export interface UseWakeWordOptions {
   onCommand: (text: string) => void;
   /** Fired when wake mode auto-pauses after 30s of silence. */
   onAutoPause?: () => void;
+  /** Fired when a wake-word command is confirmed and about to process. */
+  onWakeConfirmed?: () => void;
   /** Fired when wake mode is force-disabled (repeated mic/permission errors). */
   onDisabled?: (reason: string) => void;
 }
@@ -36,7 +39,7 @@ export interface WakeWordHook {
   pause: () => void;
 }
 
-export function useWakeWord({ enabled, onCommand, onAutoPause, onDisabled }: UseWakeWordOptions): WakeWordHook {
+export function useWakeWord({ enabled, onCommand, onAutoPause, onWakeConfirmed, onDisabled }: UseWakeWordOptions): WakeWordHook {
   const [paused, setPaused] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -50,9 +53,9 @@ export function useWakeWord({ enabled, onCommand, onAutoPause, onDisabled }: Use
   const silenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const restartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const callbacksRef = useRef({ onCommand, onAutoPause, onDisabled });
+  const callbacksRef = useRef({ onCommand, onAutoPause, onWakeConfirmed, onDisabled });
   useEffect(() => {
-    callbacksRef.current = { onCommand, onAutoPause, onDisabled };
+    callbacksRef.current = { onCommand, onAutoPause, onWakeConfirmed, onDisabled };
   });
 
   const clearSilenceTimer = useCallback(() => {
@@ -113,11 +116,15 @@ export function useWakeWord({ enabled, onCommand, onAutoPause, onDisabled }: Use
     const match = WAKE_REGEX.exec(text);
     if (match) {
       const remainder = text.slice(match.index + match[0].length).trim();
-      if (remainder.length >= 2) {
+      if (remainder.length >= MIN_COMMAND_LENGTH) {
         if (finalChunk) {
+          callbacksRef.current.onWakeConfirmed?.();
           fireCommand(remainder);
         }
         // On interim-only matches, wait for the final to capture it fully.
+      } else if (remainder.length > 0) {
+        // Too-short follow-up: don't trigger on false partial fragments.
+        return;
       } else {
         // Bare "Ario" — open the command window.
         awokenAtRef.current = Date.now();

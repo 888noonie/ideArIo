@@ -1,8 +1,10 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import type { SpeechSynthesisHook, ArioCue } from '../types/ideario';
+import { loadSpeechSettings, saveSpeechSettings } from '../lib/speech-settings';
 
 const CUES: Record<ArioCue, string> = {
   wake: 'Hey there, I am Ario. How can I help you capture your idea?',
+  confirm: 'Okay.',
   listening: 'Listening',
   processing: 'Processing your idea',
   saved: 'Idea saved to your vault',
@@ -40,17 +42,28 @@ export function useSpeechSynthesis(): SpeechSynthesisHook {
       return;
     }
 
+    const persisted = loadSpeechSettings();
     const selectVoice = () => {
       const voices = window.speechSynthesis.getVoices();
-      // Prefer a calm, clear English voice. Some WebViews never return
-      // any voices — speech often still works with the default voice,
-      // so an empty list is not fatal.
+      const preferredByUri = persisted.voiceURI
+        ? voices.find((v) => v.voiceURI === persisted.voiceURI)
+        : null;
+      const preferredByName = persisted.voiceName
+        ? voices.find((v) => v.name === persisted.voiceName)
+        : null;
       const preferred =
+        preferredByUri ||
+        preferredByName ||
         voices.find((v) => v.name.includes('Google UK English Male')) ||
         voices.find((v) => v.lang.startsWith('en')) ||
         voices.find((v) => v.default) ||
         voices[0];
       voiceRef.current = preferred || null;
+      saveSpeechSettings({
+        voiceURI: preferred?.voiceURI,
+        voiceName: preferred?.name,
+        rate: persisted.rate ?? 0.95,
+      });
     };
 
     selectVoice();
@@ -103,9 +116,10 @@ export function useSpeechSynthesis(): SpeechSynthesisHook {
 
     const doSpeak = () => {
       try {
+        const settings = loadSpeechSettings();
         const utterance = new SpeechSynthesisUtterance(text);
         utterance.voice = voiceRef.current;
-        utterance.rate = 0.95;
+        utterance.rate = settings.rate ?? 0.95;
         utterance.pitch = 1.0;
         utterance.volume = priority === 'critical' ? 1.0 : 0.8;
         utterRef.current = utterance;

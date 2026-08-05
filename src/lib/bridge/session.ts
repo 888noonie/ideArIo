@@ -24,6 +24,7 @@ import type {
   BridgeStatus,
   SignalPayload,
 } from './types';
+import { isValidBridgePayload, isValidEnvelope } from './validate';
 import { openMailbox, type Mailbox } from './mailbox';
 
 const MAILBOX_POLL_MS = 2_500;
@@ -230,6 +231,14 @@ class BridgeSessionImpl implements BridgeSession {
   // -- inbound ----------------------------------------------------------------
 
   private receive(env: BridgeEnvelope): void {
+    if (!isValidEnvelope(env)) {
+      console.warn('Dropped invalid bridge envelope', env);
+      return;
+    }
+    if (!isValidBridgePayload(env)) {
+      console.warn('Dropped invalid bridge payload', env);
+      return;
+    }
     if (!this.role || env.from === this.role) return; // ignore our own echoes
     if (this.seenIds.has(env.id)) return; // dedupe across both transports
     this.seenIds.add(env.id);

@@ -135,6 +135,9 @@ export default function App() {
     onAutoPause: useCallback(() => {
       speak('Wake mode paused after silence. Tap the mic to resume.', 'normal');
     }, [speak]),
+    onWakeConfirmed: useCallback(() => {
+      cue('confirm');
+    }, [cue]),
     onDisabled: useCallback((reason: string) => {
       setWakeMode(false);
       setArioState('error');
@@ -251,17 +254,32 @@ export default function App() {
 
   // Surface no-speech (error event or 7s watchdog) as a gentle,
   // recoverable state with voice + visual feedback.
+  const speechCaptureErrorStreak = useRef(0);
+
+  const speakCaptureIssue = useCallback(
+    (fallback: string) => {
+      speechCaptureErrorStreak.current += 1;
+      if (speechCaptureErrorStreak.current === 2) {
+        speak('Mic is struggling. Typing works too.', 'critical');
+      } else if (speechCaptureErrorStreak.current < 2) {
+        speak(fallback, 'critical');
+      }
+    },
+    [speak]
+  );
+
   useEffect(() => {
     if (noSpeech) {
       clearNoSpeech();
       setArioState((prev) => (prev === 'thinking' ? prev : 'idle'));
-      speak("I didn't hear anything — tap and try again, or type instead.", 'critical');
+      speakCaptureIssue("I didn't hear anything — tap and try again, or type instead.");
     }
-  }, [noSpeech, clearNoSpeech, speak]);
+  }, [noSpeech, clearNoSpeech, speakCaptureIssue]);
 
   const handleSpeechFinalized = useCallback(async (finalTranscript: string) => {
     if (!finalTranscript.trim()) return;
 
+    speechCaptureErrorStreak.current = 0;
     processingRef.current = true;
     setArioState('thinking');
     cue('processing');
@@ -409,9 +427,9 @@ export default function App() {
   useEffect(() => {
     if (speechError && speechSupported) {
       setArioState('error');
-      speak('I did not catch that. Please try again.', 'critical');
+      speakCaptureIssue('I did not catch that. Please try again.');
     }
-  }, [speechError, speechSupported, speak]);
+  }, [speechError, speechSupported, speakCaptureIssue]);
 
   const allSynced = savedIdeas.length === 0 || savedIdeas.every((i) => i.synced);
 

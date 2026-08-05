@@ -30,17 +30,29 @@ const SAVE_PATTERN = /^(?:save|tag)\s+this(?:\s+as\s+(.+))?$/;
 const LINK_PATTERN = /^(open|queue)\s+(.+?)(?:\s+in\s+(?:the\s+)?background)?$/;
 const OPEN_TRUST_PATTERN = /^(?:i'm|im|i\s+am)\s+open$/;
 const FOCUSED_TRUST_PATTERN = /^(?:i'm|im|i\s+am)\s+focused$/;
+const CONFIRM_PATTERN = /^confirm$/;
 const STOP_PATTERN = /^(?:stop\s+talking|quiet|shush)$/;
+
+let pendingTrustEscalation = false;
 
 export async function tryReflex(
   input: string,
   ctx: ReflexContext
 ): Promise<ReflexResult> {
   const text = input.trim().toLowerCase();
-  if (!text) return { handled: false };
+  if (!text) {
+    pendingTrustEscalation = false;
+    return { handled: false };
+  }
+
+  if (CONFIRM_PATTERN.test(text) && pendingTrustEscalation) {
+    pendingTrustEscalation = false;
+    return { handled: true, response: ctx.setTrust('co_pilot') };
+  }
 
   const saveMatch = text.match(SAVE_PATTERN);
   if (saveMatch) {
+    pendingTrustEscalation = false;
     const tag = saveMatch[1]?.trim() || undefined;
     // Instant spoken confirmation; any network save keeps running async
     // behind ctx.saveLastExchange — the reflex lane never blocks on it.
@@ -49,14 +61,20 @@ export async function tryReflex(
   }
 
   if (OPEN_TRUST_PATTERN.test(text)) {
-    return { handled: true, response: ctx.setTrust('co_pilot') };
+    pendingTrustEscalation = true;
+    return {
+      handled: true,
+      response: "Say 'confirm' to switch to co-pilot.",
+    };
   }
 
   if (FOCUSED_TRUST_PATTERN.test(text)) {
+    pendingTrustEscalation = false;
     return { handled: true, response: ctx.setTrust('suggest') };
   }
 
   if (STOP_PATTERN.test(text)) {
+    pendingTrustEscalation = false;
     const wasSpeaking = ctx.stopSpeaking();
     return {
       handled: true,
@@ -66,11 +84,13 @@ export async function tryReflex(
 
   const linkMatch = text.match(LINK_PATTERN);
   if (linkMatch) {
+    pendingTrustEscalation = false;
     const urls = extractUrls(linkMatch[2]);
     if (urls.length > 0) {
       return { handled: true, response: ctx.queueLink(urls[0]) };
     }
   }
 
+  pendingTrustEscalation = false;
   return { handled: false };
 }
