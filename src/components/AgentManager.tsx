@@ -13,6 +13,9 @@ const PROVIDER_LABELS: Record<AgentSpec['provider'], string> = {
   openrouter: 'OpenRouter',
   ollama: 'Ollama',
   nim: 'NIM',
+  gemini: 'Google Gemini',
+  groq: 'Groq',
+  ofox: 'OfoxAI',
 };
 
 interface HealthState {

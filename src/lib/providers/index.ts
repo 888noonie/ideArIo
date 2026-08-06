@@ -2,6 +2,9 @@ import type { ChatProvider, ProviderId } from './types';
 import { openrouterProvider } from './openrouter';
 import { ollamaProvider } from './ollama';
 import { nimProvider } from './nim';
+import { geminiProvider } from './gemini';
+import { groqProvider } from './groq';
+import { ofoxProvider } from './ofox';
 
 export type { ChatProvider, ProviderId, ChatMessage, ChatRequest } from './types';
 
@@ -9,6 +12,9 @@ const PROVIDERS: Record<ProviderId, ChatProvider> = {
   openrouter: openrouterProvider,
   ollama: ollamaProvider,
   nim: nimProvider,
+  gemini: geminiProvider,
+  groq: groqProvider,
+  ofox: ofoxProvider,
 };
 
 export function getProvider(id: ProviderId): ChatProvider {
@@ -16,7 +22,7 @@ export function getProvider(id: ProviderId): ChatProvider {
 }
 
 export function allProviders(): ChatProvider[] {
-  return [openrouterProvider, ollamaProvider, nimProvider];
+  return [openrouterProvider, groqProvider, geminiProvider, ofoxProvider, ollamaProvider, nimProvider];
 }
 
 // --- BYOK key storage -------------------------------------------------------

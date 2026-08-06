@@ -72,7 +72,12 @@ function isValidAgent(value: unknown): value is AgentSpec {
     typeof a.id === 'string' &&
     typeof a.name === 'string' &&
     typeof a.wakeWord === 'string' &&
-    (a.provider === 'openrouter' || a.provider === 'ollama' || a.provider === 'nim') &&
+    (a.provider === 'openrouter' ||
+      a.provider === 'ollama' ||
+      a.provider === 'nim' ||
+      a.provider === 'gemini' ||
+      a.provider === 'groq' ||
+      a.provider === 'ofox') &&
     typeof a.model === 'string' &&
     typeof a.systemPrompt === 'string' &&
     typeof a.color === 'string' &&

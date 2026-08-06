@@ -16,6 +16,9 @@ const PROVIDER_LABELS: Record<ProviderId, string> = {
   openrouter: 'OpenRouter',
   ollama: 'Ollama',
   nim: 'NVIDIA NIM (legacy)',
+  gemini: 'Google Gemini',
+  groq: 'Groq',
+  ofox: 'OfoxAI',
 };
 
 /** 8 curated swatches (incl. the 3 default agent colors) + 1 neutral dark (A7). */

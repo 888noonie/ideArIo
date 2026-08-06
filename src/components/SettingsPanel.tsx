@@ -7,6 +7,7 @@ import type { BridgeStatus } from '../lib/bridge/types';
 import { sendSettingsSync } from '../lib/settings-sync';
 import type { Theme } from '../lib/theme';
 import type { ModelInfo } from '../lib/model-registry';
+import type { ProviderId } from '../lib/providers/types';
 
 interface SettingsPanelProps {
   theme: Theme;
@@ -20,6 +21,14 @@ interface SettingsPanelProps {
 }
 
 const GITHUB_TOKEN_KEY = 'ideario-github-token';
+type CloudProviderId = Extract<ProviderId, 'openrouter' | 'groq' | 'gemini' | 'ofox'>;
+
+const CLOUD_PROVIDERS: Array<{ id: CloudProviderId; label: string; placeholder: string; domain: string }> = [
+  { id: 'openrouter', label: 'OpenRouter', placeholder: 'sk-or-...', domain: 'openrouter.ai' },
+  { id: 'groq', label: 'Groq', placeholder: 'gsk_...', domain: 'api.groq.com' },
+  { id: 'gemini', label: 'Google Gemini', placeholder: 'AIza...', domain: 'generativelanguage.googleapis.com' },
+  { id: 'ofox', label: 'OfoxAI', placeholder: 'sk-of-...', domain: 'api.ofox.ai' },
+];
 
 function loadGithubToken(): string {
   try {
@@ -55,9 +64,14 @@ export function SettingsPanel({
   onResetAgents,
   parked,
 }: SettingsPanelProps) {
-  const [orKey, setOrKey] = useState(() => getApiKey('openrouter') ?? '');
-  const [showOrKey, setShowOrKey] = useState(false);
-  const [orSaved, setOrSaved] = useState(false);
+  const [cloudKeys, setCloudKeys] = useState<Record<CloudProviderId, string>>(() => ({
+    openrouter: getApiKey('openrouter') ?? '',
+    groq: getApiKey('groq') ?? '',
+    gemini: getApiKey('gemini') ?? '',
+    ofox: getApiKey('ofox') ?? '',
+  }));
+  const [shownCloudKeys, setShownCloudKeys] = useState<Partial<Record<CloudProviderId, boolean>>>({});
+  const [savedCloudKeys, setSavedCloudKeys] = useState<Partial<Record<CloudProviderId, boolean>>>({});
   const [ollamaUrl, setOllamaUrl] = useState(getOllamaBaseUrl);
   const [ollamaSaved, setOllamaSaved] = useState(false);
   const [ghToken, setGhToken] = useState(loadGithubToken);
@@ -96,11 +110,17 @@ export function SettingsPanel({
     syncTimerRef.current = window.setTimeout(() => setSyncStatus(null), 4000);
   }, []);
 
-  const handleSaveOrKey = useCallback(() => {
-    setApiKey('openrouter', orKey.trim());
-    setOrSaved(true);
-    window.setTimeout(() => setOrSaved(false), 2000);
-  }, [orKey]);
+  const handleCloudKeyChange = useCallback((provider: CloudProviderId, value: string) => {
+    setCloudKeys((current) => ({ ...current, [provider]: value }));
+  }, []);
+
+  const handleSaveCloudKey = useCallback((provider: CloudProviderId) => {
+    setApiKey(provider, cloudKeys[provider].trim());
+    setSavedCloudKeys((current) => ({ ...current, [provider]: true }));
+    window.setTimeout(() => {
+      setSavedCloudKeys((current) => ({ ...current, [provider]: false }));
+    }, 2000);
+  }, [cloudKeys]);
 
   const handleWipeKeys = useCallback(() => {
     if (!parked) return;
@@ -112,11 +132,11 @@ export function SettingsPanel({
     }
 
     wipeKeysOnDevice();
-    setOrKey('');
+    setCloudKeys({ openrouter: '', groq: '', gemini: '', ofox: '' });
     setGhToken('');
-    setShowOrKey(false);
+    setShownCloudKeys({});
     setShowGhToken(false);
-    setOrSaved(false);
+    setSavedCloudKeys({});
     setWipeArmed(false);
     if (wipeTimerRef.current !== null) {
       window.clearTimeout(wipeTimerRef.current);
@@ -150,54 +170,63 @@ export function SettingsPanel({
     'font-medium whitespace-nowrap transition-colors hover:border-ario-turquoise/50 ' +
     'focus:outline-none focus:ring-2 focus:ring-ario-turquoise/50';
 
-  const providerKeyCount = ['openrouter', 'ollama', 'nim'].filter((id) => getApiKey(id as any)).length;
+  const providerKeyCount = CLOUD_PROVIDERS.filter(({ id }) => Boolean(getApiKey(id))).length;
 
   return (
     <div className="h-full overflow-y-auto chat-scroll">
       <div className="max-w-2xl mx-auto p-6 space-y-6">
         <h2 className="text-2xl font-semibold text-ario-text">Settings</h2>
 
-        {/* OpenRouter BYOK */}
-        <section className={sectionClass}>
-          <h3 className={headingClass}>OpenRouter API key</h3>
-          <p className={hintClass}>
-            Used by OpenRouter agents for chat. Stored only in this browser — never
-            committed, never sent anywhere except openrouter.ai.
-          </p>
-          {parked ? (
-            <div className="flex gap-3">
-              <div className="relative flex-1">
-                <input
-                  type={showOrKey ? 'text' : 'password'}
-                  value={orKey}
-                  onChange={(e) => setOrKey(e.target.value)}
-                  placeholder="sk-or-..."
-                  autoComplete="off"
-                  className={inputClass}
-                  style={{ userSelect: 'text', WebkitUserSelect: 'text' }}
-                  aria-label="OpenRouter API key"
-                />
+        {/* Cloud BYOK */}
+        {CLOUD_PROVIDERS.map((provider) => (
+          <section key={provider.id} className={sectionClass}>
+            <h3 className={headingClass}>{provider.label} API key</h3>
+            <p className={hintClass}>
+              Used by {provider.label} agents for chat. Stored only in this browser — never
+              committed, never sent anywhere except {provider.domain}.
+            </p>
+            {parked ? (
+              <div className="flex gap-3">
+                <div className="relative flex-1">
+                  <input
+                    type={shownCloudKeys[provider.id] ? 'text' : 'password'}
+                    value={cloudKeys[provider.id]}
+                    onChange={(event) => handleCloudKeyChange(provider.id, event.target.value)}
+                    placeholder={provider.placeholder}
+                    autoComplete="off"
+                    className={inputClass}
+                    style={{ userSelect: 'text', WebkitUserSelect: 'text' }}
+                    aria-label={`${provider.label} API key`}
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShownCloudKeys((current) => ({
+                    ...current,
+                    [provider.id]: !current[provider.id],
+                  }))}
+                  className={smallButtonClass}
+                  aria-label={shownCloudKeys[provider.id] ? `Hide ${provider.label} API key` : `Show ${provider.label} API key`}
+                >
+                  {shownCloudKeys[provider.id] ? 'Hide' : 'Show'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleSaveCloudKey(provider.id)}
+                  className={smallButtonClass}
+                >
+                  {savedCloudKeys[provider.id] ? 'Saved' : 'Save'}
+                </button>
               </div>
-              <button
-                type="button"
-                onClick={() => setShowOrKey((v) => !v)}
-                className={smallButtonClass}
-                aria-label={showOrKey ? 'Hide API key' : 'Show API key'}
-              >
-                {showOrKey ? 'Hide' : 'Show'}
-              </button>
-              <button type="button" onClick={handleSaveOrKey} className={smallButtonClass}>
-                {orSaved ? 'Saved' : 'Save'}
-              </button>
-            </div>
-          ) : (
-            <div className="rounded-2xl bg-amber-400/10 border border-amber-400/40 p-4 text-amber-200 text-sm">
-              {providerKeyCount > 0
-                ? `${providerKeyCount} key${providerKeyCount === 1 ? '' : 's'} stored — park to edit`
-                : 'Park to set provider keys.'}
-            </div>
-          )}
-        </section>
+            ) : (
+              <div className="rounded-2xl bg-amber-400/10 border border-amber-400/40 p-4 text-amber-200 text-sm">
+                {providerKeyCount > 0
+                  ? `${providerKeyCount} key${providerKeyCount === 1 ? '' : 's'} stored — park to edit`
+                  : 'Park to set provider keys.'}
+              </div>
+            )}
+          </section>
+        ))}
 
         {/* Ollama */}
         <section className={sectionClass}>
@@ -240,8 +269,9 @@ export function SettingsPanel({
         <section className={sectionClass}>
           <h3 className={headingClass}>GitHub Gist token (optional)</h3>
           <p className={hintClass}>
-            Enables syncing ideas to a GitHub Gist. The token is stored in this
-            browser only and is never bundled into the app.
+            Enables syncing ideas to a GitHub Gist. Not needed for pairing —
+            the Bridge relay handles that server-side. The token is stored in
+            this browser only and is never bundled into the app.
           </p>
           <div className="flex gap-3">
             <input

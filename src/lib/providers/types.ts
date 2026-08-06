@@ -1,4 +1,4 @@
-export type ProviderId = 'openrouter' | 'ollama' | 'nim';
+export type ProviderId = 'openrouter' | 'ollama' | 'nim' | 'gemini' | 'groq' | 'ofox';
 
 export interface ChatMessage {
   role: 'system' | 'user' | 'assistant';

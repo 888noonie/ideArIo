@@ -1,6 +1,6 @@
 # ideArIo Providers — BYOK Setup Guide
 
-ideArIo chat agents run against three providers. Keys live **only in your
+ideArIo chat agents run against six providers. Keys live **only in your
 browser's localStorage** (or server-side env vars for NIM) and are sent only
 to the matching provider endpoint. Nothing is committed or proxied anywhere
 else.
@@ -52,11 +52,33 @@ The original ideArIo backend. The browser **never** sees this key.
    cycles a fallback model list if the requested model fails. A
    "NVIDIA_API_KEY not configured" error means step 2 is incomplete.
 
+## 4. Groq (cloud, bring your own key)
+
+1. In ideArIo **Settings**, enter your Groq API key (stored as
+   `ideario-key-groq` in localStorage).
+2. Groq agents call `https://api.groq.com/openai/v1/chat/completions` with the
+   key as a Bearer token. Use **Fetch models** in the agent editor to list the
+   models available to the key.
+
+## 5. Google Gemini (cloud, bring your own key)
+
+1. In **Settings**, enter a Gemini API key (stored as `ideario-key-gemini`).
+2. Gemini agents call the Google Generative Language API directly from the
+   browser. Use **Fetch models** to show models that support text generation.
+
+## 6. OfoxAI (cloud, bring your own key)
+
+1. In **Settings**, enter your OfoxAI API key (stored as `ideario-key-ofox`).
+2. OfoxAI uses its OpenAI-compatible endpoint at
+   `https://api.ofox.ai/v1/chat/completions`. Use **Fetch models** to list the
+   public OfoxAI model catalog.
+
 ## Troubleshooting
 
 | Symptom | Likely fix |
 | --- | --- |
 | 401 from OpenRouter | Re-check the key in Settings (`openrouter.ai/keys`) |
+| 401 from Groq, Gemini, or OfoxAI | Re-check that provider's key and model access in Settings |
 | "Could not connect to Ollama" | Start with `OLLAMA_ORIGINS=* ollama serve` |
 | Empty Ollama response | Pull the model: `ollama pull <model>` |
 | "NVIDIA_API_KEY not configured" | Add env var in Vercel, redeploy |
