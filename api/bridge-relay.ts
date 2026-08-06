@@ -98,6 +98,19 @@ function rateLimited(ip: string): boolean {
 
 function originAllowed(req: VercelRequest): boolean {
   const origin = (req.headers.origin as string | undefined) ?? '';
+  const forwardedHost = req.headers['x-forwarded-host'];
+  const host = (typeof forwardedHost === 'string' ? forwardedHost : req.headers.host ?? '')
+    .split(',')[0]
+    .trim();
+  const forwardedProto = req.headers['x-forwarded-proto'];
+  const protocol = (typeof forwardedProto === 'string' ? forwardedProto : 'https')
+    .split(',')[0]
+    .trim();
+  // A browser calling its own deployed origin is allowed even when a custom
+  // domain does not match VERCEL_URL's generated deployment hostname.
+  if (origin && host && origin === `${protocol}://${host}`) {
+    return true;
+  }
   const vercelUrl = process.env.VERCEL_URL ?? '';
   if (vercelUrl && (origin === `https://${vercelUrl}` || origin.endsWith(`.${vercelUrl}`))) {
     return true;
