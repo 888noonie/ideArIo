@@ -7,6 +7,9 @@
     "api/nim-proxy.ts": {
       "maxDuration": 10
     },
+    "api/ollama-proxy.ts": {
+      "maxDuration": 10
+    },
     "api/bridge-relay.ts": {
       "maxDuration": 10
     }

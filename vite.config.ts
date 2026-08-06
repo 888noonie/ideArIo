@@ -5,6 +5,7 @@ import { fileURLToPath } from 'url'
 import { execSync } from 'node:child_process'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { handleNimProxyRequest, type NimProxyBody } from './api/nim-handler.js'
+import { handleOllamaProxyRequest, type OllamaProxyBody } from './api/ollama-handler.js'
 import { buildMockCompletion } from './src/lib/nim-mock.js'
 import { handleRelayDevRequest } from './src/lib/bridge/relay-mock.js'
 
@@ -76,6 +77,48 @@ function nimProxyDevPlugin(env: Record<string, string>): Plugin {
 }
 
 /**
+ * Local dev middleware for /api/ollama-proxy.
+ * Mirrors the Vercel serverless function (api/ollama-proxy.ts) — ollama.com
+ * sends no CORS headers, so even in dev the browser can't call it directly.
+ */
+function ollamaProxyDevPlugin(): Plugin {
+  return {
+    name: 'ideario-ollama-proxy-dev',
+    configureServer(server) {
+      server.middlewares.use('/api/ollama-proxy', (req, res) => {
+        if (req.method !== 'POST') {
+          res.statusCode = 405;
+          res.setHeader('Content-Type', 'application/json');
+          res.end(JSON.stringify({ error: 'Method not allowed' }));
+          return;
+        }
+
+        let raw = '';
+        req.on('data', (chunk: Buffer) => {
+          raw += chunk.toString();
+        });
+        req.on('end', async () => {
+          res.setHeader('Content-Type', 'application/json');
+          try {
+            const body = (raw ? JSON.parse(raw) : {}) as OllamaProxyBody;
+            const result = await handleOllamaProxyRequest(body);
+            res.statusCode = result.status;
+            res.end(JSON.stringify(result.body));
+          } catch (error) {
+            res.statusCode = 500;
+            res.end(
+              JSON.stringify({
+                error: `Dev ollama-proxy failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
+              })
+            );
+          }
+        });
+      });
+    },
+  };
+}
+
+/**
  * Local dev middleware for /api/bridge-relay.
  * Mirrors the Vercel serverless function (api/bridge-relay.ts) using an
  * in-memory store so the full phone ↔ display pairing flow works under
@@ -137,7 +180,7 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, __dirname, '');
 
   return {
-    plugins: [react(), nimProxyDevPlugin(env), bridgeRelayDevPlugin(), swBuildIdPlugin()],
+    plugins: [react(), nimProxyDevPlugin(env), ollamaProxyDevPlugin(), bridgeRelayDevPlugin(), swBuildIdPlugin()],
     resolve: {
       alias: {
         '@': path.resolve(__dirname, './src'),
