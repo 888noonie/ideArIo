@@ -14,14 +14,12 @@ import type { Mailbox } from './mailbox';
 const FILE_NAME = 'messages.json';
 const MAX_ENVELOPES = 100;
 const RELAY_PATH = '/api/bridge-relay';
-
-// Pairing-code expiry (F-01): a mailbox is valid for 24h. The hub refreshes
-// the expiry on each poll near the end, so an active pairing never lapses.
 const MAILBOX_TTL_MS = 24 * 60 * 60 * 1000;
 const MAILBOX_REFRESH_THRESHOLD = MAILBOX_TTL_MS / 4;
 
 export interface RelayCredentials {
   code: string;
+  roomId: string;
   hubSecret?: string;
   displaySecret?: string;
 }
@@ -33,7 +31,7 @@ interface MailboxFile {
 
 function relayUrl(creds: RelayCredentials): string {
   const secret = creds.hubSecret ?? creds.displaySecret ?? '';
-  return `${RELAY_PATH}?action=room&code=${encodeURIComponent(creds.code)}&secret=${encodeURIComponent(secret)}`;
+  return `${RELAY_PATH}?action=room&code=${encodeURIComponent(creds.code)}&room=${encodeURIComponent(creds.roomId)}&secret=${encodeURIComponent(secret)}`;
 }
 
 async function readMailboxFile(creds: RelayCredentials): Promise<MailboxFile> {
@@ -46,9 +44,7 @@ async function readMailboxFile(creds: RelayCredentials): Promise<MailboxFile> {
     throw new Error(`Bridge relay read failed (HTTP ${response.status}). ${text.slice(0, 120)}`.trim());
   }
   const parsed = (await response.json()) as MailboxFile;
-  if (!parsed || !Array.isArray(parsed.envelopes)) {
-    return { envelopes: [] };
-  }
+  if (!parsed || !Array.isArray(parsed.envelopes)) return { envelopes: [] };
   return {
     envelopes: parsed.envelopes.filter(
       (env) => env && typeof env.id === 'string' && typeof env.ts === 'number'
@@ -57,24 +53,11 @@ async function readMailboxFile(creds: RelayCredentials): Promise<MailboxFile> {
   };
 }
 
-async function writeEnvelopes(
-  creds: RelayCredentials,
-  envelopes: BridgeEnvelope[],
-  expiresAt?: number
-): Promise<void> {
-  const capped = envelopes
-    .slice()
-    .sort((a, b) => a.ts - b.ts)
-    .slice(-MAX_ENVELOPES);
-  const file: MailboxFile = { envelopes: capped };
-  if (expiresAt) file.expires_at = expiresAt;
-
+async function writeEnvelope(creds: RelayCredentials, envelope: BridgeEnvelope): Promise<void> {
   const response = await fetch(relayUrl(creds), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      [FILE_NAME]: { content: JSON.stringify(file) },
-    }),
+    body: JSON.stringify({ envelope }),
   });
   if (response.status === 410) {
     throw new Error('Pairing code expired — generate a new one on the phone.');
@@ -85,32 +68,49 @@ async function writeEnvelopes(
   }
 }
 
-/**
- * Open a relay mailbox using the supplied credentials.
- * The credentials (including secrets) stay in the BridgeSession instance.
- */
+async function refreshExpiry(
+  creds: RelayCredentials,
+  envelopes: BridgeEnvelope[],
+  expiresAt: number
+): Promise<void> {
+  const capped = envelopes
+    .slice()
+    .sort((a, b) => a.ts - b.ts)
+    .slice(-MAX_ENVELOPES);
+  const response = await fetch(relayUrl(creds), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      [FILE_NAME]: { content: JSON.stringify({ envelopes: capped, expires_at: expiresAt }) },
+    }),
+  });
+  if (!response.ok) {
+    throw new Error(`Bridge relay refresh failed (HTTP ${response.status}).`);
+  }
+}
+
+/** Open a relay mailbox using credentials held only in this BridgeSession. */
 export function openRelayMailbox(creds: RelayCredentials): Mailbox {
   let lastSeenTs = 0;
   const seenIds = new Set<string>();
+  let writeTail: Promise<void> = Promise.resolve();
+
+  function enqueueWrite(write: () => Promise<void>): Promise<void> {
+    const result = writeTail.then(write);
+    writeTail = result.catch(() => undefined);
+    return result;
+  }
 
   return {
     async send(env: BridgeEnvelope): Promise<void> {
-      if (!isValidEnvelope(env)) {
-        throw new Error('Invalid bridge envelope.');
-      }
-      const current = await readMailboxFile(creds);
-      const byId = new Map<string, BridgeEnvelope>();
-      for (const existingEnv of current.envelopes) byId.set(existingEnv.id, existingEnv);
-      byId.set(env.id, env);
-      await writeEnvelopes(creds, [...byId.values()], current.expires_at);
+      if (!isValidEnvelope(env)) throw new Error('Invalid bridge envelope.');
+      await enqueueWrite(() => writeEnvelope(creds, env));
     },
 
     async poll(): Promise<BridgeEnvelope[]> {
       const current = await readMailboxFile(creds);
-      // Refresh the expiry near the end of its life so an active pairing
-      // never lapses (cheap extra write, only in the last 25% of TTL).
       if (current.expires_at && Date.now() + MAILBOX_REFRESH_THRESHOLD > current.expires_at) {
-        await writeEnvelopes(creds, current.envelopes, Date.now() + MAILBOX_TTL_MS);
+        await enqueueWrite(() => refreshExpiry(creds, current.envelopes, Date.now() + MAILBOX_TTL_MS));
       }
       const fresh = current.envelopes
         .filter((env) => env.ts > lastSeenTs || !seenIds.has(env.id))
@@ -119,7 +119,6 @@ export function openRelayMailbox(creds: RelayCredentials): Mailbox {
         seenIds.add(env.id);
         if (env.ts > lastSeenTs) lastSeenTs = env.ts;
       }
-      // Bound the seen-id set so long sessions do not grow it forever.
       if (seenIds.size > MAX_ENVELOPES * 4) {
         const keep = new Set(current.envelopes.map((env) => env.id));
         for (const id of seenIds) {

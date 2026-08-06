@@ -2,11 +2,11 @@
  * Bridge session: the probe-and-degrade transport ladder.
  *
  *   WebRTC DataChannel  -> rung 'webrtc'  (instant, mailbox drops to 30s keepalive)
- *   Gist mailbox        -> rung 'mailbox' (2.5s poll)
+ *   Gist mailbox        -> rung 'mailbox' (4s poll)
  *   stopped / no token  -> rung 'offline'
  *
  * The hub creates the mailbox and the WebRTC offer (STUN
- * stun.l.google.com:19302); the display answers. SDP + trickle ICE ride
+ * stun.l.google.com:19302); the display answers. Complete SDP descriptions ride
  * in 'signal' envelopes through the mailbox until the DataChannel
  * opens. Every 30s the hub silently re-probes (re-offers) while still
  * on the mailbox rung, so an upgrade happens without user action.
@@ -28,10 +28,10 @@ import { isValidBridgePayload, isValidEnvelope } from './validate';
 import { openMailbox, type Mailbox } from './mailbox';
 import { openRelayMailbox, type RelayCredentials } from './relay-mailbox';
 
-const MAILBOX_POLL_MS = 2_500;
+const MAILBOX_POLL_MS = 4_000;
 const KEEPALIVE_POLL_MS = 30_000;
 const REPROBE_MS = 30_000;
-const PING_MS = 10_000;
+const PING_MS = 15_000;
 const SILENCE_CHECK_MS = 5_000;
 const SILENCE_TIMEOUT_MS = 20_000;
 const OUTBOUND_BUFFER_MAX = 20;
@@ -80,11 +80,11 @@ async function createRelayRoom(): Promise<RelayCredentials> {
     const text = await response.text().catch(() => '');
     throw new Error(`Bridge relay create failed (HTTP ${response.status}). ${text.slice(0, 120)}`.trim());
   }
-  const data = (await response.json()) as { code: string; hubSecret: string };
-  if (!data.code || !data.hubSecret) {
+  const data = (await response.json()) as { code: string; roomId: string; hubSecret: string };
+  if (!data.code || !data.roomId || !data.hubSecret) {
     throw new Error('Bridge relay returned an incomplete room.');
   }
-  return { code: data.code, hubSecret: data.hubSecret };
+  return { code: data.code, roomId: data.roomId, hubSecret: data.hubSecret };
 }
 
 async function joinRelayRoom(code: string): Promise<RelayCredentials> {
@@ -106,11 +106,11 @@ async function joinRelayRoom(code: string): Promise<RelayCredentials> {
     const text = await response.text().catch(() => '');
     throw new Error(`Bridge relay join failed (HTTP ${response.status}). ${text.slice(0, 120)}`.trim());
   }
-  const data = (await response.json()) as { displaySecret: string };
-  if (!data.displaySecret) {
+  const data = (await response.json()) as { roomId: string; displaySecret: string };
+  if (!data.roomId || !data.displaySecret) {
     throw new Error('Bridge relay returned an incomplete join response.');
   }
-  return { code, displaySecret: data.displaySecret };
+  return { code, roomId: data.roomId, displaySecret: data.displaySecret };
 }
 
 async function openMailboxForRole(role: BridgeRole, code: string): Promise<{ mailbox: Mailbox; code: string }> {
@@ -391,6 +391,7 @@ class BridgeSessionImpl implements BridgeSession {
       this.pc
         .createOffer()
         .then((offer) => this.pc!.setLocalDescription(offer))
+        .then(() => this.waitForIceGatheringComplete(this.pc!))
         .then(() => {
           if (this.pc?.localDescription) {
             this.upgrading = true;
@@ -459,12 +460,28 @@ class BridgeSessionImpl implements BridgeSession {
 
   private wirePeerConnection(): void {
     if (!this.pc) return;
-    this.pc.onicecandidate = (event) => {
-      this.sendSignal({ candidate: event.candidate ? event.candidate.toJSON() : null });
-    };
     this.pc.ondatachannel = (event) => {
       this.wireDataChannel(event.channel);
     };
+  }
+
+  /** Wait for candidates to be embedded in SDP so each side sends one signal. */
+  private waitForIceGatheringComplete(pc: RTCPeerConnection): Promise<void> {
+    if (pc.iceGatheringState === 'complete') return Promise.resolve();
+    return new Promise((resolve) => {
+      const timeout = window.setTimeout(finish, 8_000);
+      const onStateChange = () => {
+        if (pc.iceGatheringState === 'complete') {
+          finish();
+        }
+      };
+      function finish(): void {
+        window.clearTimeout(timeout);
+        pc.removeEventListener('icegatheringstatechange', onStateChange);
+        resolve();
+      }
+      pc.addEventListener('icegatheringstatechange', onStateChange);
+    });
   }
 
   private wireDataChannel(channel: RTCDataChannel): void {
@@ -581,6 +598,7 @@ class BridgeSessionImpl implements BridgeSession {
         await this.pc.setRemoteDescription(payload.sdp);
         const answer = await this.pc.createAnswer();
         await this.pc.setLocalDescription(answer);
+        await this.waitForIceGatheringComplete(this.pc);
         if (this.pc.localDescription) {
           this.sendSignal({ sdp: this.pc.localDescription.toJSON() });
         }

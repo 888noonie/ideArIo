@@ -12,7 +12,7 @@ code.
 |---|---|---|
 | Pairing | `src/lib/bridge/session.ts` | 6-digit code; hub creates the room, display joins it |
 | Mailbox transport | `src/lib/bridge/mailbox.ts` | One private Gist per code (`ideario-bridge-<code>`), one file `messages.json` = `{ envelopes }` (last 100 kept) |
-| Transport ladder | `src/lib/bridge/session.ts` | WebRTC DataChannel → Gist mailbox → offline, probe-and-degrade with silent 30s re-probe |
+| Transport ladder | `src/lib/bridge/session.ts` | WebRTC DataChannel → relay-backed Gist mailbox → offline, probe-and-degrade with silent 30s re-probe |
 | Reflex lane | `src/lib/reflex.ts` | Pattern-matched local commands answered before any LLM round-trip (<250ms) |
 | Trust spine | `src/lib/trust.ts` | `suggest / co_pilot / autonomous` + urgency cap + sliding 60s rate limiter |
 | Urgency signals | `src/lib/urgency.ts` | whisper/tap/alert as haptics + quiet WebAudio blips, never visual |
@@ -38,12 +38,12 @@ All Gist calls use `Authorization: Bearer <token>` and
 ```
 probe RTCPeerConnection
   ├─ available ── hub: createOffer (STUN stun.l.google.com:19302)
-  │                SDP + trickle ICE ride 'signal' envelopes via mailbox
+  │                Complete SDP descriptions ride 'signal' envelopes via mailbox
   │                display answers; DataChannel 'open'
   │                  └─ rung = webrtc   (mailbox drops to 30s keepalive poll)
   │                DC close/error
   │                  └─ rung = mailbox  (2.5s poll resumes)
-  └─ missing ──── rung = mailbox        (2.5s poll, no WebRTC attempted)
+  └─ missing ──── rung = mailbox        (4s poll, no WebRTC attempted)
 
 no peer traffic for 20s ── connected = false (either rung)
 every 30s ── silent re-probe: hub re-offers ONLY while rung = mailbox
@@ -68,16 +68,21 @@ The mailbox is a **degraded** rung, not a realtime one. Voice-initiated
 actions that need instant feedback are handled by the reflex lane
 locally; only chat entries and chat input cross the bridge.
 
-## Gist rate-limit math
+## Relay fallback budget
 
 GitHub's REST API allows **5,000 authenticated requests/hour** per token.
+The browser talks only to the Vercel relay; the relay owns the private Gist
+and returns an opaque room ID at pairing time so it does not search Gists on
+every mailbox request.
 
-- Mailbox rung: poll every 2.5s ≈ **1,440 reads/hr per side**,
-  plus ~360 presence-ping writes/hr ≈ **~1,800 req/hr per side**.
+- Mailbox rung: poll every 4s ≈ **900 reads/hr per side**, plus 240
+  presence-ping appends/hr per side. Each append is one Gist read and one
+  patch, for about **~1,380 GitHub requests/hr per side**.
 - WebRTC rung: keepalive poll every 30s = 120 reads/hr per side —
   negligible.
-- Worst case (both sides on mailbox, same token): ~3,600 req/hr total,
-  still inside the 5,000/hr limit. Separate tokens: ~1,800/hr each.
+- Worst case (both sides on mailbox): **~2,760 req/hr total**, comfortably
+  inside the shared server token's limit. Complete SDP avoids a burst of
+  candidate-by-candidate mailbox writes while the direct connection starts.
 - Envelope file is capped at the last 100 envelopes, so reads stay
   small and writes are one file each.
 

@@ -142,7 +142,7 @@ export function handleRelayDevRequest(
       lastActivity: now,
     };
     rooms.set(code, room);
-    sendJson(res, 200, { code, hubSecret: room.hubSecret, expiresAt: room.expiresAt });
+    sendJson(res, 200, { code, roomId: code, hubSecret: room.hubSecret, expiresAt: room.expiresAt });
     return;
   }
 
@@ -168,7 +168,7 @@ export function handleRelayDevRequest(
         }
         room.displaySecret = randomSecret();
         room.lastActivity = Date.now();
-        sendJson(res, 200, { displaySecret: room.displaySecret, expiresAt: room.expiresAt });
+        sendJson(res, 200, { roomId: code, displaySecret: room.displaySecret, expiresAt: room.expiresAt });
       } catch {
         sendJson(res, 400, { error: 'Invalid request body.' });
       }
@@ -198,19 +198,30 @@ export function handleRelayDevRequest(
     if (req.method === 'POST') {
       readBody(req).then((raw) => {
         try {
-          const body = JSON.parse(raw) as Record<string, { content?: string }>;
-          const file = body['messages.json'];
-          if (!file || typeof file.content !== 'string') {
-            sendJson(res, 400, { error: 'Missing messages.json content.' });
-            return;
+          const body = JSON.parse(raw) as Record<string, unknown>;
+          const current = readEnvelopes(room);
+          let incoming: BridgeEnvelope[];
+          let expiresAt = current.expires_at;
+          if (isValidEnvelope(body.envelope)) {
+            incoming = [body.envelope];
+          } else {
+            const file = body['messages.json'] as { content?: unknown } | undefined;
+            if (typeof file?.content !== 'string') {
+              sendJson(res, 400, { error: 'Missing relay envelope.' });
+              return;
+            }
+            const parsed = JSON.parse(file.content) as { envelopes?: unknown; expires_at?: number };
+            if (!parsed || !Array.isArray(parsed.envelopes)) {
+              sendJson(res, 400, { error: 'Invalid messages.json shape.' });
+              return;
+            }
+            incoming = parsed.envelopes.filter(isValidEnvelope);
+            expiresAt = parsed.expires_at ?? current.expires_at;
           }
-          // Validate envelope array before storing.
-          const parsed = JSON.parse(file.content) as { envelopes?: unknown };
-          if (!parsed || !Array.isArray(parsed.envelopes)) {
-            sendJson(res, 400, { error: 'Invalid messages.json shape.' });
-            return;
-          }
-          room.content = file.content;
+          const merged = new Map<string, BridgeEnvelope>();
+          for (const envelope of current.envelopes) merged.set(envelope.id, envelope);
+          for (const envelope of incoming) merged.set(envelope.id, envelope);
+          room.content = JSON.stringify({ envelopes: [...merged.values()], expires_at: expiresAt });
           room.lastActivity = Date.now();
           sendJson(res, 200, { ok: true });
         } catch {

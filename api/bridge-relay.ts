@@ -72,7 +72,10 @@ function randomCode(): string {
 }
 
 // Best-effort in-memory rate limit. Vercel serverless instances are ephemeral,
-// so this is a speed-bump against direct scripts, not a hard guarantee.
+// Best-effort in-memory rate limit for public pairing actions. Vercel
+// serverless instances are ephemeral, so this is a speed-bump, not a hard
+// guarantee. Authenticated room traffic is deliberately excluded: two paired
+// devices poll and signal through the relay faster than this public limit.
 const hits = new Map<string, number[]>();
 const WINDOW_MS = 60_000;
 const MAX_PER_WINDOW = 30;
@@ -192,8 +195,7 @@ async function readGist(token: string, gistId: string): Promise<GistFiles> {
   return gist.files;
 }
 
-async function readGistFile(token: string, gistId: string): Promise<{ envelopes: BridgeEnvelope[]; expires_at?: number }> {
-  const files = await readGist(token, gistId);
+async function readGistFile(files: GistFiles): Promise<{ envelopes: BridgeEnvelope[]; expires_at?: number }> {
   const file = files[FILE_NAME];
   if (!file) return { envelopes: [] };
 
@@ -215,8 +217,7 @@ async function readGistFile(token: string, gistId: string): Promise<{ envelopes:
   }
 }
 
-async function readRoomFile(token: string, gistId: string): Promise<RoomFile | null> {
-  const files = await readGist(token, gistId);
+function readRoomFile(files: GistFiles): RoomFile | null {
   const file = files[ROOM_FILE_NAME];
   if (!file?.content) return null;
   try {
@@ -289,8 +290,8 @@ async function handleCreate(req: VercelRequest, res: VercelResponse): Promise<vo
     hub_secret_hash: hashSecret(hubSecret),
     expires_at: now + MAILBOX_TTL_MS,
   };
-  await createMailboxGist(token, code, room);
-  sendJson(res, 200, { code, hubSecret, expiresAt: room.expires_at });
+  const createdGist = await createMailboxGist(token, code, room);
+  sendJson(res, 200, { code, roomId: createdGist.id, hubSecret, expiresAt: room.expires_at });
 }
 
 async function handleJoin(req: VercelRequest, res: VercelResponse): Promise<void> {
@@ -314,7 +315,7 @@ async function handleJoin(req: VercelRequest, res: VercelResponse): Promise<void
   }
 
   try {
-    const room = await readRoomFile(token, gist.id);
+    const room = readRoomFile(await readGist(token, gist.id));
     if (!room) {
       sendJson(res, 500, { error: 'Pairing room is invalid.' });
       return;
@@ -330,7 +331,7 @@ async function handleJoin(req: VercelRequest, res: VercelResponse): Promise<void
     const displaySecret = randomSecret();
     room.display_secret_hash = hashSecret(displaySecret);
     await writeRoomFile(token, gist.id, room);
-    sendJson(res, 200, { displaySecret, expiresAt: room.expires_at });
+    sendJson(res, 200, { roomId: gist.id, displaySecret, expiresAt: room.expires_at });
   } catch {
     sendJson(res, 500, { error: 'Could not read pairing mailbox.' });
   }
@@ -339,13 +340,16 @@ async function handleJoin(req: VercelRequest, res: VercelResponse): Promise<void
 async function handleRoom(req: VercelRequest, res: VercelResponse): Promise<void> {
   const code = (req.query.code as string | undefined) ?? '';
   const secret = (req.query.secret as string | undefined) ?? '';
+  const roomId = (req.query.room as string | undefined) ?? '';
   const token = getToken();
   if (!token) {
     sendJson(res, 500, { error: 'Relay not configured.' });
     return;
   }
 
-  const gist = await findMailboxGist(token, code);
+  const gist = /^[a-f0-9]+$/i.test(roomId)
+    ? { id: roomId }
+    : await findMailboxGist(token, code);
   if (!gist) {
     sendJson(res, 404, { error: 'Room not found or secret invalid.' });
     return;
@@ -354,7 +358,8 @@ async function handleRoom(req: VercelRequest, res: VercelResponse): Promise<void
   let current: { envelopes: BridgeEnvelope[]; expires_at?: number };
   let roomMetadata: RoomFile;
   try {
-    const room = await readRoomFile(token, gist.id);
+    const files = await readGist(token, gist.id);
+    const room = readRoomFile(files);
     if (!room || (!secretMatches(secret, room.hub_secret_hash) && !secretMatches(secret, room.display_secret_hash))) {
       sendJson(res, 404, { error: 'Room not found or secret invalid.' });
       return;
@@ -364,7 +369,7 @@ async function handleRoom(req: VercelRequest, res: VercelResponse): Promise<void
       return;
     }
     roomMetadata = room;
-    current = await readGistFile(token, gist.id);
+    current = await readGistFile(files);
   } catch {
     sendJson(res, 500, { error: 'Could not read pairing mailbox.' });
     return;
@@ -380,29 +385,38 @@ async function handleRoom(req: VercelRequest, res: VercelResponse): Promise<void
     return;
   }
 
-  const body = req.body as Record<string, { content?: string }> | undefined;
-  const file = body?.['messages.json'];
-  if (!file || typeof file.content !== 'string') {
-    sendJson(res, 400, { error: 'Missing messages.json content.' });
-    return;
-  }
-
-  let parsed: { envelopes?: unknown; expires_at?: number };
-  try {
-    parsed = JSON.parse(file.content) as { envelopes?: unknown; expires_at?: number };
-    if (!parsed || !Array.isArray(parsed.envelopes)) {
-      sendJson(res, 400, { error: 'Invalid messages.json shape.' });
+  const body = req.body as Record<string, unknown> | undefined;
+  let incoming: BridgeEnvelope[];
+  let expiresAt = current.expires_at;
+  if (isValidEnvelope(body?.envelope)) {
+    // Normal sends append a single envelope server-side. This avoids a
+    // client-side read-modify-write race between the phone and display.
+    incoming = [body.envelope];
+  } else {
+    const file = body?.[FILE_NAME] as { content?: unknown } | undefined;
+    if (typeof file?.content !== 'string') {
+      sendJson(res, 400, { error: 'Missing relay envelope.' });
       return;
     }
-  } catch {
-    sendJson(res, 400, { error: 'Invalid messages.json content.' });
-    return;
+    try {
+      const parsed = JSON.parse(file.content) as { envelopes?: unknown; expires_at?: number };
+      if (!parsed || !Array.isArray(parsed.envelopes)) {
+        sendJson(res, 400, { error: 'Invalid messages.json shape.' });
+        return;
+      }
+      incoming = parsed.envelopes.filter(isValidEnvelope);
+      expiresAt = parsed.expires_at ?? current.expires_at;
+    } catch {
+      sendJson(res, 400, { error: 'Invalid messages.json content.' });
+      return;
+    }
   }
 
-  const incoming = parsed.envelopes.filter(isValidEnvelope);
+  const merged = new Map<string, BridgeEnvelope>();
+  for (const envelope of current.envelopes) merged.set(envelope.id, envelope);
+  for (const envelope of incoming) merged.set(envelope.id, envelope);
   try {
-    const expiresAt = parsed.expires_at ?? current.expires_at;
-    await writeGistFile(token, gist.id, incoming, expiresAt);
+    await writeGistFile(token, gist.id, [...merged.values()], expiresAt);
     if (expiresAt && expiresAt !== roomMetadata.expires_at) {
       roomMetadata.expires_at = expiresAt;
       await writeRoomFile(token, gist.id, roomMetadata);
@@ -438,7 +452,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
   }
 
   const ip = (req.headers['x-forwarded-for'] as string | undefined)?.split(',')[0] ?? 'unknown';
-  if (rateLimited(ip)) {
+  const publicPairingAction = action === 'create' || action === 'join';
+  if (publicPairingAction && rateLimited(ip)) {
     sendJson(res, 429, { error: 'Too many requests.' });
     return;
   }
