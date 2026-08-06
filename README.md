@@ -17,13 +17,16 @@ An always-on chat panel plus six tabs:
 
 Provider keys are entered in **Settings** and stored ONLY in browser `localStorage` (`ideario-key-*`). They are never committed, never sent anywhere except the matching provider endpoint, and during Bridge settings sync they travel only over the WebRTC rung — never through the Gist mailbox.
 
-Three providers are supported:
+Six providers are supported:
 
 1. **NVIDIA NIM** — server-side key: set `NVIDIA_API_KEY` in Vercel → Settings → Environment Variables (all environments), then redeploy. The app calls the serverless `/api/nim-proxy`; the key never reaches the browser bundle.
 2. **OpenRouter** — key entered in Settings, stored in `localStorage`, called directly from the browser.
-3. **Ollama** — local models; set the base URL in Settings (default `http://localhost:11434`). No key required.
+3. **Groq** — key entered in Settings, stored in `localStorage`, called directly from the browser.
+4. **Google Gemini** — key entered in Settings, stored in `localStorage`, called directly from the browser.
+5. **OfoxAI** — key entered in Settings, stored in `localStorage`, called directly from the browser.
+6. **Ollama** — local models; set the base URL in Settings (default `http://localhost:11434`). No key required.
 
-Optional: a GitHub token may be entered in Settings for Gist sync. The app stores it only in this browser and never bundles it.
+Optional: a GitHub token may be entered in Settings for Gist sync. The app stores it only in this browser and never bundles it. Bridge pairing now uses a server-side relay (`BRIDGE_GITHUB_TOKEN` in Vercel), so the car display does not need a Gist token to pair.
 
 ## Develop
 

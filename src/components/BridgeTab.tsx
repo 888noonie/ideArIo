@@ -27,16 +27,21 @@ const TRUST_OPTIONS: { id: TrustState; label: string }[] = [
   { id: 'autonomous', label: 'Autonomous' },
 ];
 
-function randomCode(): string {
-  return String(Math.floor(100000 + Math.random() * 900000));
-}
-
 function lastSeenLabel(lastPeerSeen: number | null, now: number): string {
   if (!lastPeerSeen) return 'No peer seen yet';
   const seconds = Math.max(0, Math.round((now - lastPeerSeen) / 1000));
   if (seconds < 5) return 'Peer seen just now';
   if (seconds < 60) return `Peer seen ${seconds}s ago`;
   return `Peer seen ${Math.round(seconds / 60)}m ago`;
+}
+
+function hasLocalGistToken(): boolean {
+  try {
+    const stored = window.localStorage.getItem('ideario-github-token');
+    return Boolean(stored && stored.trim());
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -104,7 +109,9 @@ export function BridgeTab({ paired, parked, onPairedChange, onParkedChange }: Br
     setStarting(true);
     setStartError(null);
     try {
-      await sessionRef.current.start('hub', randomCode());
+      // In relay mode the server creates the 6-digit code; the empty string
+      // is ignored and the effective code lands in status.code.
+      await sessionRef.current.start('hub', '');
     } catch (error) {
       setStartError(error instanceof Error ? error.message : String(error));
     } finally {
@@ -301,6 +308,12 @@ export function BridgeTab({ paired, parked, onPairedChange, onParkedChange }: Br
               {lastSeenLabel(status.lastPeerSeen, now)}
             </span>
           </div>
+
+          {!hasLocalGistToken() && (
+            <p className="mt-2 text-ario-muted text-sm" role="status">
+              Paired via Ario relay — credentials sync after you confirm the code.
+            </p>
+          )}
 
           {/* F-08: honest "still trying to upgrade" surface instead of a
               silent indefinite re-probe loop. */}

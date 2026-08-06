@@ -26,6 +26,7 @@ import type {
 } from './types';
 import { isValidBridgePayload, isValidEnvelope } from './validate';
 import { openMailbox, type Mailbox } from './mailbox';
+import { openRelayMailbox, type RelayCredentials } from './relay-mailbox';
 
 const MAILBOX_POLL_MS = 2_500;
 const KEEPALIVE_POLL_MS = 30_000;
@@ -48,7 +49,11 @@ const RTC_CONFIG: RTCConfiguration = {
 };
 
 export interface BridgeSession {
-  start(role: BridgeRole, code: string): Promise<void>;
+  /** Hub creates a fresh relay room; an optional `code` is ignored in relay mode. */
+  start(role: 'hub', code?: string): Promise<void>;
+  /** Display joins an existing relay room using the 6-digit code. */
+  start(role: 'display', code: string): Promise<void>;
+  start(role: BridgeRole, code?: string): Promise<void>;
   stop(): void;
   send(type: BridgeEnvelope['type'], payload: unknown): void;
   onMessage(cb: (env: BridgeEnvelope) => void): void;
@@ -56,6 +61,78 @@ export interface BridgeSession {
   getStatus(): BridgeStatus;
   /** S-02: mark the 4-digit SAS code as confirmed by the user. */
   confirmSas(): void;
+}
+
+const RELAY_URL = (import.meta.env.VITE_BRIDGE_RELAY_URL as string | undefined) ?? '/api/bridge-relay';
+
+function hasLocalGistToken(): boolean {
+  try {
+    const stored = window.localStorage.getItem('ideario-github-token');
+    return Boolean(stored && stored.trim());
+  } catch {
+    return false;
+  }
+}
+
+async function createRelayRoom(): Promise<RelayCredentials> {
+  const response = await fetch(`${RELAY_URL}?action=create`, { method: 'POST' });
+  if (!response.ok) {
+    const text = await response.text().catch(() => '');
+    throw new Error(`Bridge relay create failed (HTTP ${response.status}). ${text.slice(0, 120)}`.trim());
+  }
+  const data = (await response.json()) as { code: string; hubSecret: string };
+  if (!data.code || !data.hubSecret) {
+    throw new Error('Bridge relay returned an incomplete room.');
+  }
+  return { code: data.code, hubSecret: data.hubSecret };
+}
+
+async function joinRelayRoom(code: string): Promise<RelayCredentials> {
+  const response = await fetch(`${RELAY_URL}?action=join`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ code }),
+  });
+  if (response.status === 404) {
+    throw new Error('Pairing code not found — check the code shown on the phone.');
+  }
+  if (response.status === 409) {
+    throw new Error('This code is already in use on another display.');
+  }
+  if (response.status === 410) {
+    throw new Error('Pairing code expired — generate a new one on the phone.');
+  }
+  if (!response.ok) {
+    const text = await response.text().catch(() => '');
+    throw new Error(`Bridge relay join failed (HTTP ${response.status}). ${text.slice(0, 120)}`.trim());
+  }
+  const data = (await response.json()) as { displaySecret: string };
+  if (!data.displaySecret) {
+    throw new Error('Bridge relay returned an incomplete join response.');
+  }
+  return { code, displaySecret: data.displaySecret };
+}
+
+async function openMailboxForRole(role: BridgeRole, code: string): Promise<{ mailbox: Mailbox; code: string }> {
+  // Relay mode is the default. VITE_BRIDGE_RELAY_URL can be set to an empty
+  // string to force the legacy direct-Gist transport (both sides must then
+  // have a local token).
+  if (RELAY_URL) {
+    if (role === 'hub') {
+      const creds = await createRelayRoom();
+      return { mailbox: openRelayMailbox(creds), code: creds.code };
+    }
+    const creds = await joinRelayRoom(code);
+    return { mailbox: openRelayMailbox(creds), code };
+  }
+
+  // Legacy direct-Gist fallback: requires a token on this device.
+  if (!hasLocalGistToken()) {
+    throw new Error(
+      'Bridge needs either the Ario relay or a GitHub token in Settings (Gist token).'
+    );
+  }
+  return { mailbox: await openMailbox(code), code };
 }
 
 function createEnvelopeId(): string {
@@ -95,11 +172,13 @@ class BridgeSessionImpl implements BridgeSession {
 
   // -- public API ---------------------------------------------------------
 
-  async start(role: BridgeRole, code: string): Promise<void> {
+  async start(role: BridgeRole, code?: string): Promise<void> {
     this.stop();
     this.role = role;
-    this.code = code;
-    this.mailbox = await openMailbox(code); // throws descriptive Error when no token
+    const effectiveCode = code ?? '';
+    const { mailbox, code: finalCode } = await openMailboxForRole(role, effectiveCode);
+    this.mailbox = mailbox;
+    this.code = finalCode;
     this.rung = 'mailbox';
     this.emitStatus();
 

@@ -6,6 +6,7 @@ import { execSync } from 'node:child_process'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { handleNimProxyRequest, type NimProxyBody } from './api/nim-handler.js'
 import { buildMockCompletion } from './src/lib/nim-mock.js'
+import { handleRelayDevRequest } from './src/lib/bridge/relay-mock.js'
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url))
 
@@ -75,6 +76,23 @@ function nimProxyDevPlugin(env: Record<string, string>): Plugin {
 }
 
 /**
+ * Local dev middleware for /api/bridge-relay.
+ * Mirrors the Vercel serverless function (api/bridge-relay.ts) using an
+ * in-memory store so the full phone ↔ display pairing flow works under
+ * `npm run dev` with no server-side GitHub token.
+ */
+function bridgeRelayDevPlugin(): Plugin {
+  return {
+    name: 'ideario-bridge-relay-dev',
+    configureServer(server) {
+      server.middlewares.use('/api/bridge-relay', (req, res) => {
+        handleRelayDevRequest(req, res);
+      });
+    },
+  };
+}
+
+/**
  * F-24: inject a build ID (git SHA) into the built dist/sw.js so the
  * service-worker cache keys change automatically on every deploy. A forgotten
  * manual cache-version bump can no longer ship a stale shell to installed
@@ -119,7 +137,7 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, __dirname, '');
 
   return {
-    plugins: [react(), nimProxyDevPlugin(env), swBuildIdPlugin()],
+    plugins: [react(), nimProxyDevPlugin(env), bridgeRelayDevPlugin(), swBuildIdPlugin()],
     resolve: {
       alias: {
         '@': path.resolve(__dirname, './src'),

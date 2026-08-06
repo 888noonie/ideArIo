@@ -6,6 +6,9 @@
   "functions": {
     "api/nim-proxy.ts": {
       "maxDuration": 10
+    },
+    "api/bridge-relay.ts": {
+      "maxDuration": 10
     }
   },
   "rewrites": [
@@ -17,7 +20,7 @@
       "headers": [
         { "key": "X-Content-Type-Options", "value": "nosniff" },
         { "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" },
-        { "key": "Content-Security-Policy", "value": "default-src 'self'; connect-src 'self' https://openrouter.ai https://api.github.com https://gist.githubusercontent.com https://integrate.api.nvidia.com http://localhost:* http://127.0.0.1:*; media-src 'self' blob:; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; base-uri 'self'; form-action 'self'; frame-ancestors 'none'" }
+        { "key": "Content-Security-Policy", "value": "default-src 'self'; connect-src 'self' https://openrouter.ai https://api.groq.com https://generativelanguage.googleapis.com https://api.ofox.ai https://api.github.com https://gist.githubusercontent.com https://integrate.api.nvidia.com http://localhost:* http://127.0.0.1:*; media-src 'self' blob:; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; base-uri 'self'; form-action 'self'; frame-ancestors 'none'" }
       ]
     }
   ]
