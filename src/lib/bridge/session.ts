@@ -292,6 +292,7 @@ class BridgeSessionImpl implements BridgeSession {
   private checkSilence(): void {
     if (
       this.connected &&
+      this.rung !== 'webrtc' &&
       this.lastPeerSeen !== null &&
       Date.now() - this.lastPeerSeen > SILENCE_TIMEOUT_MS
     ) {
