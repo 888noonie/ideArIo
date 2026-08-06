@@ -202,6 +202,9 @@ export default function App() {
       if (typeof s.ollamaBaseUrl === 'string') {
         localStorage.setItem('ideario-ollama-url', s.ollamaBaseUrl);
       }
+      if (s.ollamaMode === 'local' || s.ollamaMode === 'cloud') {
+        localStorage.setItem('ideario-ollama-mode', s.ollamaMode);
+      }
     } catch {
       // Ignore localStorage errors
     }

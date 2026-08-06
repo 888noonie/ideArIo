@@ -1,7 +1,16 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { ModelSelector } from './ModelSelector';
 import { ThemeSwitcher } from './ThemeSwitcher';
-import { getApiKey, setApiKey, getOllamaBaseUrl, setOllamaBaseUrl, wipeKeysOnDevice } from '../lib/providers';
+import {
+  getApiKey,
+  setApiKey,
+  getOllamaBaseUrl,
+  getOllamaMode,
+  setOllamaBaseUrl,
+  setOllamaMode,
+  wipeKeysOnDevice,
+  type OllamaMode,
+} from '../lib/providers';
 import { getBridgeSession } from '../lib/bridge/session';
 import type { BridgeStatus } from '../lib/bridge/types';
 import { sendSettingsSync } from '../lib/settings-sync';
@@ -73,6 +82,9 @@ export function SettingsPanel({
   const [shownCloudKeys, setShownCloudKeys] = useState<Partial<Record<CloudProviderId, boolean>>>({});
   const [savedCloudKeys, setSavedCloudKeys] = useState<Partial<Record<CloudProviderId, boolean>>>({});
   const [ollamaUrl, setOllamaUrl] = useState(getOllamaBaseUrl);
+  const [ollamaMode, setOllamaModeState] = useState<OllamaMode>(getOllamaMode);
+  const [ollamaKey, setOllamaKey] = useState(() => getApiKey('ollama') ?? '');
+  const [showOllamaKey, setShowOllamaKey] = useState(false);
   const [ollamaSaved, setOllamaSaved] = useState(false);
   const [ghToken, setGhToken] = useState(loadGithubToken);
   const [showGhToken, setShowGhToken] = useState(false);
@@ -133,6 +145,8 @@ export function SettingsPanel({
 
     wipeKeysOnDevice();
     setCloudKeys({ openrouter: '', groq: '', gemini: '', ofox: '' });
+    setOllamaKey('');
+    setShowOllamaKey(false);
     setGhToken('');
     setShownCloudKeys({});
     setShowGhToken(false);
@@ -149,9 +163,11 @@ export function SettingsPanel({
 
   const handleSaveOllama = useCallback(() => {
     setOllamaBaseUrl(ollamaUrl.trim() || 'http://localhost:11434');
+    setOllamaMode(ollamaMode);
+    setApiKey('ollama', ollamaKey);
     setOllamaSaved(true);
     window.setTimeout(() => setOllamaSaved(false), 2000);
-  }, [ollamaUrl]);
+  }, [ollamaKey, ollamaMode, ollamaUrl]);
 
   const handleGhTokenChange = useCallback((value: string) => {
     setGhToken(value);
@@ -230,26 +246,68 @@ export function SettingsPanel({
 
         {/* Ollama */}
         <section className={sectionClass}>
-          <h3 className={headingClass}>Ollama (local)</h3>
+          <h3 className={headingClass}>Ollama</h3>
           <p className={hintClass}>
-            Run Ollama with <code className="text-ario-turquoise">OLLAMA_ORIGINS=*</code> (or your
-            Vercel origin) to allow browser calls.
+            {ollamaMode === 'cloud'
+              ? 'Cloud calls go directly to ollama.com with your Ollama API key.'
+              : <>Run Ollama with <code className="text-ario-turquoise">OLLAMA_ORIGINS=*</code> (or your Vercel origin) to allow browser calls.</>}
           </p>
-          <div className="flex gap-3">
-            <input
-              type="url"
-              value={ollamaUrl}
-              onChange={(e) => setOllamaUrl(e.target.value)}
-              placeholder="http://localhost:11434"
-              autoComplete="off"
-              className={inputClass}
-              style={{ userSelect: 'text', WebkitUserSelect: 'text' }}
-              aria-label="Ollama base URL"
-            />
-            <button type="button" onClick={handleSaveOllama} className={smallButtonClass}>
-              {ollamaSaved ? 'Saved' : 'Save'}
-            </button>
-          </div>
+          {parked ? (
+            <>
+              <div className="grid grid-cols-2 gap-3" role="group" aria-label="Ollama connection mode">
+                {(['local', 'cloud'] as const).map((mode) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    onClick={() => setOllamaModeState(mode)}
+                    aria-pressed={ollamaMode === mode}
+                    className={`min-h-14 rounded-2xl border text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-ario-turquoise/50 ${
+                      ollamaMode === mode
+                        ? 'bg-ario-turquoise/15 border-ario-turquoise/50 text-ario-turquoise'
+                        : 'bg-ario-card border-white/10 text-ario-muted hover:border-ario-turquoise/30'
+                    }`}
+                  >
+                    {mode === 'local' ? 'Local Ollama' : 'Ollama Cloud'}
+                  </button>
+                ))}
+              </div>
+              {ollamaMode === 'cloud' ? (
+                <div className="flex gap-3">
+                  <input
+                    type={showOllamaKey ? 'text' : 'password'}
+                    value={ollamaKey}
+                    onChange={(event) => setOllamaKey(event.target.value)}
+                    placeholder="Ollama API key"
+                    autoComplete="off"
+                    className={inputClass}
+                    style={{ userSelect: 'text', WebkitUserSelect: 'text' }}
+                    aria-label="Ollama Cloud API key"
+                  />
+                  <button type="button" onClick={() => setShowOllamaKey((shown) => !shown)} className={smallButtonClass}>
+                    {showOllamaKey ? 'Hide' : 'Show'}
+                  </button>
+                </div>
+              ) : (
+                <input
+                  type="url"
+                  value={ollamaUrl}
+                  onChange={(event) => setOllamaUrl(event.target.value)}
+                  placeholder="http://localhost:11434"
+                  autoComplete="off"
+                  className={inputClass}
+                  style={{ userSelect: 'text', WebkitUserSelect: 'text' }}
+                  aria-label="Local Ollama base URL"
+                />
+              )}
+              <button type="button" onClick={handleSaveOllama} className={smallButtonClass}>
+                {ollamaSaved ? 'Saved' : 'Save Ollama settings'}
+              </button>
+            </>
+          ) : (
+            <div className="rounded-2xl bg-amber-400/10 border border-amber-400/40 p-4 text-amber-200 text-sm">
+              Park to change Ollama connection settings.
+            </div>
+          )}
         </section>
 
         {/* NIM legacy */}

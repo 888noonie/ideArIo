@@ -24,7 +24,7 @@ Six providers are supported:
 3. **Groq** — key entered in Settings, stored in `localStorage`, called directly from the browser.
 4. **Google Gemini** — key entered in Settings, stored in `localStorage`, called directly from the browser.
 5. **OfoxAI** — key entered in Settings, stored in `localStorage`, called directly from the browser.
-6. **Ollama** — local models; set the base URL in Settings (default `http://localhost:11434`). No key required.
+6. **Ollama** — choose Local mode for offline models (default `http://localhost:11434`) or Ollama Cloud mode with a BYOK key. Use Fetch models in the agent editor to list the selected endpoint's live catalogue.
 
 Optional: a GitHub token may be entered in Settings for Gist sync. The app stores it only in this browser and never bundles it. Bridge pairing now uses a server-side relay (`BRIDGE_GITHUB_TOKEN` in Vercel), so the car display does not need a Gist token to pair.
 

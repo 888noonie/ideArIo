@@ -69,7 +69,26 @@ export function wipeKeysOnDevice(): void {
 // --- Ollama base URL ---------------------------------------------------------
 
 const OLLAMA_URL_KEY = 'ideario-ollama-url';
+const OLLAMA_MODE_KEY = 'ideario-ollama-mode';
 export const DEFAULT_OLLAMA_BASE_URL = 'http://localhost:11434';
+export const OLLAMA_CLOUD_BASE_URL = 'https://ollama.com/api';
+export type OllamaMode = 'local' | 'cloud';
+
+export function getOllamaMode(): OllamaMode {
+  try {
+    return window.localStorage.getItem(OLLAMA_MODE_KEY) === 'cloud' ? 'cloud' : 'local';
+  } catch {
+    return 'local';
+  }
+}
+
+export function setOllamaMode(mode: OllamaMode): void {
+  try {
+    window.localStorage.setItem(OLLAMA_MODE_KEY, mode);
+  } catch {
+    // storage unavailable — fail silently
+  }
+}
 
 export function getOllamaBaseUrl(): string {
   try {

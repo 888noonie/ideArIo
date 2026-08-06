@@ -8,12 +8,13 @@
 import { getBridgeSession } from './bridge/session';
 import { loadAgents, type AgentSpec } from './agents';
 import { loadTheme } from './theme';
-import { allProviders, getApiKey, getOllamaBaseUrl } from './providers';
+import { allProviders, getApiKey, getOllamaBaseUrl, getOllamaMode, type OllamaMode } from './providers';
 import { loadSelectedModelId } from './model-id';
 
 export interface SyncedSettings {
   providerKeys: Record<string, string>; // ideario-key-* values, keyed by provider id
   ollamaBaseUrl: string;
+  ollamaMode: OllamaMode;
   agents: AgentSpec[];
   theme: 'light' | 'dark';
   selectedModelId: string;
@@ -34,6 +35,7 @@ export function collectSettings(): SyncedSettings {
   return {
     providerKeys,
     ollamaBaseUrl: getOllamaBaseUrl(),
+    ollamaMode: getOllamaMode(),
     agents: loadAgents(),
     theme: loadTheme(),
     // NOTE: the live storage key is 'ideario-selected-model' (see
@@ -88,6 +90,7 @@ function isSyncedSettings(value: unknown): value is SyncedSettings {
   if (!value || typeof value !== 'object') return false;
   const s = value as Record<string, unknown>;
   if (typeof s.ollamaBaseUrl !== 'string') return false;
+  if (s.ollamaMode !== 'local' && s.ollamaMode !== 'cloud') return false;
   if (s.theme !== 'light' && s.theme !== 'dark') return false;
   if (typeof s.selectedModelId !== 'string') return false;
   if (!Array.isArray(s.agents)) return false;

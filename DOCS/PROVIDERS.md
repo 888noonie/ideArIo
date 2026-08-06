@@ -21,11 +21,11 @@ Used by the built-in **Kimi** and **DeepSeek** agents.
    editor to list everything your account can access (no key required for the
    model list).
 
-## 2. Ollama (local, no key)
+## 2. Ollama (local or cloud, bring your own key for cloud)
 
-Used by the built-in **Ario Local** agent — fully offline fallback.
+Used by the built-in **Ario Local** agent — fully offline when Local mode is selected.
 
-1. Install and run Ollama (<https://ollama.com>), then pull a model, e.g.
+1. For Local mode, install and run Ollama (<https://ollama.com>), then pull a model, e.g.
    `ollama pull llama3.1:8b`.
 2. Browsers block cross-origin calls to `localhost` unless Ollama allows them.
    Start Ollama with your app's origin (or `*` for local dev):
@@ -34,11 +34,15 @@ Used by the built-in **Ario Local** agent — fully offline fallback.
    OLLAMA_ORIGINS=* ollama serve
    ```
 
-3. In **Settings**, set the **Ollama base URL** if it differs from the default
+3. In **Settings**, select **Local Ollama** and set the base URL if it differs from the default
    `http://localhost:11434` (stored as `ideario-ollama-url`).
-4. Chat calls go to `{base}/v1/chat/completions` (OpenAI-compatible); the
-   model list comes from `{base}/api/tags`.
-5. If you see "Could not connect to Ollama", the server is down or
+4. For Cloud mode, create an API key at <https://ollama.com/settings/keys>, select
+   **Ollama Cloud**, and save the key in Settings. It is stored as
+   `ideario-key-ollama` and sent only to `https://ollama.com/api` as a Bearer token.
+5. Use **Fetch models** in the agent editor to list models available to the current
+   Local or Cloud endpoint. This avoids a stale hard-coded catalogue as Ollama adds
+   and retires cloud models.
+6. If you see "Could not connect to Ollama", the local server is down or
    `OLLAMA_ORIGINS` is missing your origin.
 
 ## 3. NVIDIA NIM (legacy, server-side key)
@@ -80,6 +84,7 @@ The original ideArIo backend. The browser **never** sees this key.
 | 401 from OpenRouter | Re-check the key in Settings (`openrouter.ai/keys`) |
 | 401 from Groq, Gemini, or OfoxAI | Re-check that provider's key and model access in Settings |
 | "Could not connect to Ollama" | Start with `OLLAMA_ORIGINS=* ollama serve` |
-| Empty Ollama response | Pull the model: `ollama pull <model>` |
+| Empty Local Ollama response | Pull the model: `ollama pull <model>` |
+| Ollama Cloud 401 | Re-check the Ollama Cloud key in Settings |
 | "NVIDIA_API_KEY not configured" | Add env var in Vercel, redeploy |
 | 30s timeouts | Provider overloaded — retry or switch model/agent |
