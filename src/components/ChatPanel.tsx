@@ -80,11 +80,16 @@ export function ChatPanel({ agents, paired, parked, onSendReady, onReflexRespons
   const seenEnvelopesRef = useRef<Set<string>>(new Set());
   const spokenEntriesRef = useRef<Set<string>>(new Set());
   const mountedRef = useRef(true);
+  // Display role: id -> "no reply yet" timeout for messages forwarded to the hub.
+  const pendingSendTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
 
   useEffect(() => {
     mountedRef.current = true;
+    const timers = pendingSendTimersRef.current;
     return () => {
       mountedRef.current = false;
+      for (const timer of timers.values()) clearTimeout(timer);
+      timers.clear();
     };
   }, []);
 
@@ -192,6 +197,14 @@ export function ChatPanel({ agents, paired, parked, onSendReady, onReflexRespons
   // kept in ts order.
   const mergeRemoteEntries = useCallback((incoming: ChatEntry[]) => {
     if (!mountedRef.current) return;
+    // Any pending message that just came back (by id) has a reply — cancel its timeout.
+    for (const e of incoming) {
+      const timer = pendingSendTimersRef.current.get(e.id);
+      if (timer !== undefined) {
+        clearTimeout(timer);
+        pendingSendTimersRef.current.delete(e.id);
+      }
+    }
     setEntries((prev) => {
       const byId = new Map(prev.map((e) => [e.id, e] as const));
       for (const e of incoming) {
@@ -204,8 +217,10 @@ export function ChatPanel({ agents, paired, parked, onSendReady, onReflexRespons
   }, []);
 
   // Local dispatch — current (bridge-off) behavior, also used by the hub to
-  // run prompts forwarded by the display.
-  const dispatchLocal = useCallback(async (rawText: string) => {
+  // run prompts forwarded by the display. `entryId` lets a forwarded
+  // chat-input reuse the display's own id so the eventual 'entries'
+  // broadcast reconciles instead of duplicating the bubble.
+  const dispatchLocal = useCallback(async (rawText: string, entryId?: string) => {
     const text = rawText.trim();
     if (!text || sending || agents.length === 0) return;
 
@@ -213,7 +228,7 @@ export function ChatPanel({ agents, paired, parked, onSendReady, onReflexRespons
     if (routed.targets.length === 0 || !routed.cleanPrompt) return;
 
     const userEntry: ChatEntry = {
-      id: createEntryId(),
+      id: entryId ?? createEntryId(),
       role: 'user',
       content: text,
       status: 'done',
@@ -261,7 +276,7 @@ export function ChatPanel({ agents, paired, parked, onSendReady, onReflexRespons
       if (role === 'display' && env.type === 'entries' && isValidEntriesPayload(env.payload)) {
         mergeRemoteEntries(env.payload);
       } else if (role === 'hub' && env.type === 'chat-input' && isValidChatInputPayload(env.payload) && mountedRef.current) {
-        void dispatchLocalRef.current(env.payload.text);
+        void dispatchLocalRef.current(env.payload.text, env.payload.id);
       }
     });
   }, [appendSystemEntry, mergeRemoteEntries]);
@@ -310,11 +325,28 @@ export function ChatPanel({ agents, paired, parked, onSendReady, onReflexRespons
       console.warn('Reflex lane failed, falling through to dispatch:', error);
     }
 
-    // (c) Display role: forward to the phone hub; replies arrive as 'entries'
-    // envelopes and are merged by id.
+    // (c) Display role: echo locally right away (this device never runs its
+    // own dispatch), forward to the phone hub, and warn if no 'entries' reply
+    // reconciles this id within the timeout — instead of silent nothing.
     if (bridgeRoleRef.current === 'display') {
-      sessionRef.current.send('chat-input', { text });
+      const id = createEntryId();
+      const userEntry: ChatEntry = {
+        id,
+        role: 'user',
+        content: text,
+        status: 'done',
+        ts: Date.now(),
+      };
+      setEntries((prev) => [...prev, userEntry]);
       setInput('');
+      sessionRef.current.send('chat-input', { text, id });
+      const timer = setTimeout(() => {
+        pendingSendTimersRef.current.delete(id);
+        if (mountedRef.current) {
+          appendSystemEntry('No reply from the phone hub yet — check the Bridge tab connection.');
+        }
+      }, 20_000);
+      pendingSendTimersRef.current.set(id, timer);
       return;
     }
 

@@ -33,11 +33,13 @@ export function isValidEntriesPayload(payload: unknown): payload is ChatEntry[] 
   return Array.isArray(payload) && payload.every(isValidChatEntry);
 }
 
-export function isValidChatInputPayload(payload: unknown): payload is { text: string } {
+export function isValidChatInputPayload(payload: unknown): payload is { text: string; id?: string } {
+  const p = payload as { text?: unknown; id?: unknown } | null;
   return (
-    payload !== null &&
-    typeof payload === 'object' &&
-    typeof (payload as { text?: unknown }).text === 'string'
+    p !== null &&
+    typeof p === 'object' &&
+    typeof p.text === 'string' &&
+    (p.id === undefined || typeof p.id === 'string')
   );
 }
 
