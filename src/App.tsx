@@ -501,6 +501,7 @@ export default function App() {
               wakeMode={wakeMode}
               wakePaused={wake.paused}
               onToggleWakeMode={handleToggleWakeMode}
+              onParkedChange={handleParkedChange}
               cueText={lastCue?.text ?? null}
               ttsAvailable={ttsAvailable}
               onReflexResponse={handleReflexResponse}

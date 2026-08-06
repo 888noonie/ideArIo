@@ -311,7 +311,7 @@ export function BridgeTab({ paired, parked, onPairedChange, onParkedChange }: Br
 
           {!hasLocalGistToken() && (
             <p className="mt-2 text-ario-muted text-sm" role="status">
-              Paired via Ario relay — credentials sync after you confirm the code.
+              Paired via Ario relay — the 4-digit verification appears after WebRTC connects.
             </p>
           )}
 

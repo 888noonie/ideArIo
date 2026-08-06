@@ -427,7 +427,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
   }
 
   const origin = req.headers.origin as string | undefined;
-  if (!origin || !originAllowed(req)) {
+  const action = (req.query.action as string | undefined) ?? '';
+  // Same-origin browser GET requests commonly omit Origin. A room read is
+  // still protected by its unguessable per-role capability secret, while all
+  // state-changing actions retain the strict origin gate below.
+  const authenticatedRoomRead = action === 'room' && req.method === 'GET';
+  if ((!origin && !authenticatedRoomRead) || (origin && !originAllowed(req))) {
     sendJson(res, 403, { error: 'Forbidden.' });
     return;
   }
@@ -443,8 +448,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     sendJson(res, 500, { error: 'Relay not configured.' });
     return;
   }
-
-  const action = (req.query.action as string | undefined) ?? '';
 
   try {
     if (action === 'create' && req.method === 'POST') {

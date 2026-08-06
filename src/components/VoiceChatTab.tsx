@@ -18,6 +18,7 @@ interface VoiceChatTabProps {
   wakeMode: boolean;
   wakePaused: boolean;
   onToggleWakeMode: () => void;
+  onParkedChange: (parked: boolean) => void;
   cueText: string | null;
   ttsAvailable: boolean;
   /** Speak a reflex confirmation aloud (voice lane feedback). */
@@ -70,6 +71,7 @@ export function VoiceChatTab({
   wakeMode,
   wakePaused,
   onToggleWakeMode,
+  onParkedChange,
   cueText,
   ttsAvailable,
   onReflexResponse,
@@ -83,6 +85,19 @@ export function VoiceChatTab({
       {/* Compact voice bar — mic pinned top-center (roadtest #1) */}
       <div className="flex-none px-4 pt-3 pb-2 border-b border-white/5 bg-ario-grey/70">
         <div className="relative flex flex-col items-center gap-1.5">
+          <button
+            type="button"
+            onClick={() => onParkedChange(!parked)}
+            aria-pressed={parked}
+            aria-label={`Switch to ${parked ? 'Driving' : 'Parked'} mode`}
+            className={`absolute left-0 top-0 min-h-12 px-3 rounded-2xl border text-xs font-semibold
+                       transition-colors focus:outline-none focus:ring-2 focus:ring-ario-turquoise/50
+                       ${parked
+                         ? 'bg-ario-turquoise/15 border-ario-turquoise/50 text-ario-turquoise'
+                         : 'bg-amber-400/10 border-amber-400/50 text-amber-200'}`}
+          >
+            {parked ? 'P Parked' : 'Car Driving'}
+          </button>
           <button
             type="button"
             onClick={onActivate}
