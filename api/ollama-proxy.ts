@@ -1,11 +1,15 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { handleOllamaProxyRequest, type OllamaProxyBody } from './ollama-handler.js';
 
-/** Same origin gate as api/nim-proxy.ts: the deployed app always sends an Origin. */
+/** Trust only the Vercel URLs assigned to this project, plus explicit origins. */
 function originAllowed(req: VercelRequest): boolean {
   const origin = (req.headers.origin as string | undefined) ?? '';
-  const vercelUrl = process.env.VERCEL_URL ?? '';
-  if (vercelUrl && (origin === `https://${vercelUrl}` || origin.endsWith(`.${vercelUrl}`))) {
+  const projectUrls = [
+    process.env.VERCEL_URL,
+    process.env.VERCEL_BRANCH_URL,
+    process.env.VERCEL_PROJECT_PRODUCTION_URL,
+  ].filter((url): url is string => Boolean(url));
+  if (projectUrls.some((url) => origin === `https://${url}`)) {
     return true;
   }
   const allowlist = (process.env.ALLOWED_ORIGINS ?? '')
