@@ -1,34 +1,31 @@
-import type { SyncedSettings } from '../lib/settings-sync';
+import type { PendingAgentSync } from '../lib/settings-sync';
 
-interface SettingsSyncPromptProps {
-  settings: SyncedSettings;
+interface AgentSyncPromptProps {
+  sync: PendingAgentSync;
   onAccept: () => void;
   onDecline: () => void;
 }
 
-/**
- * S-03: custom confirmation modal shown on the display when the hub wants to
- * sync settings (keys and theme). Nothing is written until Accept.
- * Custom component — never a native popup (AA invariant).
- */
-export function SettingsSyncPrompt({ settings, onAccept, onDecline }: SettingsSyncPromptProps) {
-  const keyCount = Object.keys(settings.providerKeys ?? {}).length;
+/** Custom display-side confirmation for an incoming phone agent transfer. */
+export function AgentSyncPrompt({ sync, onAccept, onDecline }: AgentSyncPromptProps) {
   return (
     <div
       className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 p-4"
       style={{ paddingBottom: 'calc(1rem + env(safe-area-inset-bottom, 0px))' }}
       role="dialog"
       aria-modal="true"
-      aria-label="Settings sync confirmation"
+      aria-label="Agent sync confirmation"
     >
       <div
         className="w-full max-w-md rounded-3xl bg-ario-grey border border-white/10 p-6
                    shadow-[0_0_60px_rgba(0,0,0,0.6)]"
       >
-        <h3 className="text-2xl font-semibold text-ario-text">Sync settings?</h3>
+        <h3 className="text-2xl font-semibold text-ario-text">Sync agents?</h3>
         <p className="text-ario-muted text-sm mt-2">
-          Phone wants to sync settings{keyCount > 0 ? ` (${keyCount} provider key${keyCount === 1 ? '' : 's'}, theme)` : ' (theme)'}.
-          Accept?
+          Phone wants to sync {sync.agents.length} {sync.agents.length === 1 ? 'agent' : 'agents'}.
+          {sync.preserveDisplayAgents
+            ? ' Display-only agents will be kept.'
+            : ' Display-only agents will be removed.'}
         </p>
         <div className="flex flex-col gap-3 mt-6">
           <button

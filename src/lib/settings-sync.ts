@@ -1,12 +1,12 @@
 /**
- * Settings sync (F2 + A4): hub pushes BYOK keys, Ollama URL, agents, theme
+ * Settings sync (F2 + A4): hub pushes BYOK keys, Ollama URL, theme
  * and the selected capture model to the paired display over the EXISTING
  * bridge session's 'state' envelope. WebRTC rung ONLY — API keys must never
  * transit the Gist mailbox. Hub → display only; the display never echoes.
  */
 
 import { getBridgeSession } from './bridge/session';
-import { loadAgents, type AgentSpec } from './agents';
+import { isValidAgent, loadAgents, type AgentSpec } from './agents';
 import { loadTheme } from './theme';
 import { allProviders, getApiKey, getOllamaBaseUrl, getOllamaMode, type OllamaMode } from './providers';
 import { loadSelectedModelId } from './model-id';
@@ -15,7 +15,6 @@ export interface SyncedSettings {
   providerKeys: Record<string, string>; // ideario-key-* values, keyed by provider id
   ollamaBaseUrl: string;
   ollamaMode: OllamaMode;
-  agents: AgentSpec[];
   theme: 'light' | 'dark';
   selectedModelId: string;
 }
@@ -23,6 +22,17 @@ export interface SyncedSettings {
 interface SettingsSyncPayload {
   kind?: string;
   settings?: SyncedSettings;
+}
+
+interface AgentSyncPayload {
+  kind?: string;
+  agents?: unknown;
+  preserveDisplayAgents?: unknown;
+}
+
+export interface PendingAgentSync {
+  agents: AgentSpec[];
+  preserveDisplayAgents: boolean;
 }
 
 /** Collect the current settings from this device's localStorage. */
@@ -36,7 +46,6 @@ export function collectSettings(): SyncedSettings {
     providerKeys,
     ollamaBaseUrl: getOllamaBaseUrl(),
     ollamaMode: getOllamaMode(),
-    agents: loadAgents(),
     theme: loadTheme(),
     // NOTE: the live storage key is 'ideario-selected-model' (see
     // model-registry.ts); F2's shorthand 'ideario-model' refers to it.
@@ -76,6 +85,36 @@ export function sendSettingsSync(): { sent: boolean; reason?: string } {
 }
 
 /**
+ * Hub-only, explicit agent transfer. Agent definitions can include private
+ * prompts, so they use the same WebRTC and SAS gate as settings, but never
+ * carry provider keys. Display-only agents are retained by default.
+ */
+export function sendAgentSync(
+  preserveDisplayAgents: boolean
+): { sent: boolean; reason?: string } {
+  const session = getBridgeSession();
+  const status = session.getStatus();
+  if (status.role !== 'hub') {
+    return { sent: false, reason: 'Agent sync runs from the phone hub.' };
+  }
+  if (status.rung !== 'webrtc') {
+    return { sent: false, reason: 'Agent sync needs the WebRTC rung.' };
+  }
+  if (!status.connected) {
+    return { sent: false, reason: 'No paired display is connected right now.' };
+  }
+  if (status.sas === null || status.sasVerified !== true) {
+    return { sent: false, reason: 'Confirm the 4-digit code on both devices first.' };
+  }
+  session.send('state', {
+    kind: 'agent-sync',
+    agents: loadAgents(),
+    preserveDisplayAgents,
+  });
+  return { sent: true };
+}
+
+/**
  * Display side: listen for 'settings-sync' state envelopes and STAGE the
  * settings (S-03) — nothing is written until the user explicitly accepts via
  * `takePendingSettings()`. The display role NEVER echoes settings back.
@@ -93,7 +132,6 @@ function isSyncedSettings(value: unknown): value is SyncedSettings {
   if (s.ollamaMode !== 'local' && s.ollamaMode !== 'cloud') return false;
   if (s.theme !== 'light' && s.theme !== 'dark') return false;
   if (typeof s.selectedModelId !== 'string') return false;
-  if (!Array.isArray(s.agents)) return false;
   if (typeof s.providerKeys !== 'object' || s.providerKeys === null) return false;
   return Object.values(s.providerKeys as Record<string, unknown>).every(
     (v) => typeof v === 'string'
@@ -118,4 +156,39 @@ export function takePendingSettings(): SyncedSettings | null {
   const s = pendingSettings;
   pendingSettings = null;
   return s;
+}
+
+let pendingAgentSync: PendingAgentSync | null = null;
+
+function isPendingAgentSync(value: unknown): value is PendingAgentSync {
+  if (!value || typeof value !== 'object') return false;
+  const payload = value as AgentSyncPayload;
+  return (
+    Array.isArray(payload.agents) &&
+    payload.agents.every(isValidAgent) &&
+    typeof payload.preserveDisplayAgents === 'boolean'
+  );
+}
+
+/** Display-side staging for a separately requested agent sync. */
+export function initAgentSyncListener(onPending: (sync: PendingAgentSync) => void): void {
+  const session = getBridgeSession();
+  session.onMessage((env) => {
+    if (env.type !== 'state' || session.getStatus().role !== 'display') return;
+    const payload = env.payload as AgentSyncPayload | null;
+    if (payload?.kind === 'agent-sync' && isPendingAgentSync(payload)) {
+      pendingAgentSync = {
+        agents: payload.agents,
+        preserveDisplayAgents: payload.preserveDisplayAgents,
+      };
+      onPending(pendingAgentSync);
+    }
+  });
+}
+
+/** Consume (and clear) the staged agent transfer. */
+export function takePendingAgentSync(): PendingAgentSync | null {
+  const sync = pendingAgentSync;
+  pendingAgentSync = null;
+  return sync;
 }

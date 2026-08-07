@@ -5,6 +5,7 @@ import { routePrompt, type RoutedPrompt } from '../lib/wake-router';
 import {
   loadChatLog,
   saveChatLog,
+  saveChatSnapshot,
   dispatchToAgents,
   CHAT_SYSTEM_ENTRY_EVENT,
   type ChatEntry,
@@ -17,6 +18,12 @@ import { createReflexContext } from './reflex-helpers';
 import { isValidChatInputPayload, isValidEntriesPayload } from '../lib/bridge/validate';
 
 const ACTIVE_AGENT_KEY = 'ideario-active-agent';
+
+export interface ChatActions {
+  saveSnapshot: () => boolean;
+  clear: () => void;
+  restore: (entries: ChatEntry[]) => void;
+}
 
 interface ChatPanelProps {
   agents: AgentSpec[];
@@ -31,6 +38,8 @@ interface ChatPanelProps {
   onSendReady?: (send: (text: string) => Promise<void>) => void;
   /** Called with the reflex confirmation so the voice lane can speak it. */
   onReflexResponse?: (text: string) => void;
+  /** Hands chat lifecycle actions to the owning tab. */
+  onActionsReady?: (actions: ChatActions) => void;
   /**
    * False while the Voice Chat tab is hidden (kept mounted). Used to
    * re-snap the scroll position when the tab becomes visible again —
@@ -59,7 +68,7 @@ function loadActiveAgentId(agents: AgentSpec[]): string | null {
  * "Hey everyone, ...") via routePrompt + dispatchToAgents; quick-tap chips
  * inject the wake-word prefix; no wake word -> the active agent chip.
  */
-export function ChatPanel({ agents, paired, parked, onSendReady, onReflexResponse, visible = true }: ChatPanelProps) {
+export function ChatPanel({ agents, paired, parked, onSendReady, onReflexResponse, onActionsReady, visible = true }: ChatPanelProps) {
   const [entries, setEntries] = useState<ChatEntry[]>(loadChatLog);
   const [input, setInput] = useState('');
   const [activeAgentId, setActiveAgentId] = useState<string | null>(() => loadActiveAgentId(agents));
@@ -157,6 +166,36 @@ export function ChatPanel({ agents, paired, parked, onSendReady, onReflexRespons
       }
     };
   }, []);
+
+  const replaceEntries = useCallback((nextEntries: ChatEntry[]) => {
+    const durableEntries = nextEntries.filter((entry) => entry.status !== 'thinking');
+    if (saveTimerRef.current !== null) {
+      clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
+    pendingEntriesRef.current = durableEntries;
+    lastPersistedRef.current = JSON.stringify(durableEntries);
+    entriesRef.current = durableEntries;
+    saveChatLog(durableEntries);
+    setEntries(durableEntries);
+    setInput('');
+  }, []);
+
+  const saveSnapshot = useCallback(() => (
+    saveChatSnapshot(entriesRef.current) !== null
+  ), []);
+
+  const clear = useCallback(() => {
+    replaceEntries([]);
+  }, [replaceEntries]);
+
+  const restore = useCallback((snapshotEntries: ChatEntry[]) => {
+    replaceEntries(snapshotEntries);
+  }, [replaceEntries]);
+
+  useEffect(() => {
+    onActionsReady?.({ saveSnapshot, clear, restore });
+  }, [onActionsReady, saveSnapshot, clear, restore]);
 
   // Auto-scroll to the newest message. Paired mode (car display) jumps
   // instantly — smooth scrolling reads as viewport jitter there. Also

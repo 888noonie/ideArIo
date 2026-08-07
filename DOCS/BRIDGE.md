@@ -18,6 +18,7 @@ code.
 | Urgency signals | `src/lib/urgency.ts` | whisper/tap/alert as haptics + quiet WebAudio blips, never visual |
 | Crew audio | `src/lib/crew-audio.ts` | Opt-in speech synthesis + MediaSession anchor ("Ideario Crew") |
 | Link queue | `src/lib/link-queue.ts` | Voice-initiated "queue/open <url>", visual confirmation later, cap 50 |
+| Agent sync | `src/lib/settings-sync.ts` | Explicit phone-to-display agent transfer over SAS-verified WebRTC; staged for display confirmation |
 
 ## Token resolution order
 
@@ -55,6 +56,19 @@ Inbound envelopes are deduped by id across both transports. Outbound
 envelope are buffered (max 20) while disconnected and flushed on
 connect. `lastPeerSeen` updates on ANY inbound envelope or DataChannel
 message.
+
+## Settings and agent sync
+
+Settings sync carries provider keys, Ollama configuration, theme, and the
+selected capture model. It is explicit, requires the WebRTC rung plus a
+confirmed SAS, and is staged on the display until accepted. Keys never transit
+the mailbox.
+
+Agent sync is a separate explicit transfer with the same WebRTC/SAS gate and
+display confirmation. It carries agent definitions but no provider keys. Its
+default merge preserves display-only agents; matching IDs update from the phone
+and new phone agents are appended. The phone can explicitly disable preservation
+to replace the display list.
 
 ## Latency expectations (honest numbers)
 

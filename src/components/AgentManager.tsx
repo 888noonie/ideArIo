@@ -3,6 +3,7 @@ import { AgentEditor } from './AgentEditor';
 import type { AgentSpec } from '../lib/agents';
 import { upsertAgent, deleteAgent } from '../lib/agents';
 import { getProvider } from '../lib/providers';
+import { sendAgentSync } from '../lib/settings-sync';
 
 interface AgentManagerProps {
   agents: AgentSpec[];
@@ -95,6 +96,8 @@ export function AgentManager({ agents, onAgentsChange }: AgentManagerProps) {
   const [creating, setCreating] = useState(false);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [health, setHealth] = useState<Record<string, HealthState>>({});
+  const [preserveDisplayAgents, setPreserveDisplayAgents] = useState(true);
+  const [syncStatus, setSyncStatus] = useState<{ ok: boolean; text: string } | null>(null);
 
   const handleSave = useCallback((agent: AgentSpec) => {
     onAgentsChange(upsertAgent(agent));
@@ -136,6 +139,14 @@ export function AgentManager({ agents, onAgentsChange }: AgentManagerProps) {
     }
   }, []);
 
+  const handleAgentSync = useCallback(() => {
+    const result = sendAgentSync(preserveDisplayAgents);
+    setSyncStatus({
+      ok: result.sent,
+      text: result.sent ? 'Sent to display — confirm it there.' : (result.reason ?? 'Could not sync agents.'),
+    });
+  }, [preserveDisplayAgents]);
+
   const showEditor = creating || editing !== null;
 
   if (showEditor) {
@@ -174,6 +185,45 @@ export function AgentManager({ agents, onAgentsChange }: AgentManagerProps) {
           >
             + Add agent
           </button>
+        </div>
+
+        <div className="rounded-2xl bg-ario-card border border-white/10 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="text-ario-text text-base font-medium">Sync agents to display</p>
+              <p className="text-ario-muted text-xs mt-1">
+                Send this phone&apos;s agents over the verified WebRTC link.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={handleAgentSync}
+              className="min-h-12 px-4 rounded-2xl bg-ario-turquoise/15 border border-ario-turquoise/50 text-ario-turquoise text-sm font-semibold
+                         hover:bg-ario-turquoise/25 focus:outline-none focus:ring-2 focus:ring-ario-turquoise/50"
+            >
+              Sync now
+            </button>
+          </div>
+          <button
+            type="button"
+            onClick={() => setPreserveDisplayAgents((current) => !current)}
+            aria-pressed={preserveDisplayAgents}
+            className={`mt-3 min-h-12 w-full px-4 rounded-2xl border text-left text-sm font-medium
+                       focus:outline-none focus:ring-2 focus:ring-ario-turquoise/50
+                       ${preserveDisplayAgents
+                         ? 'bg-ario-turquoise/10 border-ario-turquoise/40 text-ario-text'
+                         : 'bg-ario-red/10 border-ario-red/40 text-ario-red'}`}
+          >
+            Do not delete display agents: {preserveDisplayAgents ? 'On' : 'Off'}
+          </button>
+          {syncStatus && (
+            <p
+              role="status"
+              className={`mt-2 text-xs ${syncStatus.ok ? 'text-ario-turquoise' : 'text-ario-red'}`}
+            >
+              {syncStatus.text}
+            </p>
+          )}
         </div>
 
         {agents.length === 0 && (

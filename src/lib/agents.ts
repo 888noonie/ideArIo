@@ -65,7 +65,7 @@ export const DEFAULT_AGENTS: AgentSpec[] = [
   },
 ];
 
-function isValidAgent(value: unknown): value is AgentSpec {
+export function isValidAgent(value: unknown): value is AgentSpec {
   if (typeof value !== 'object' || value === null) return false;
   const a = value as Partial<AgentSpec>;
   return (
@@ -120,6 +120,26 @@ export function saveAgents(agents: AgentSpec[]): void {
   } catch {
     // storage unavailable — fail silently
   }
+}
+
+/**
+ * Apply phone-synced agents by ID. With preservation enabled, the display
+ * retains any agent the phone did not send; otherwise the phone is canonical.
+ */
+export function mergeSyncedAgents(
+  displayAgents: AgentSpec[],
+  incomingAgents: AgentSpec[],
+  preserveDisplayAgents: boolean
+): AgentSpec[] {
+  const incomingById = new Map(incomingAgents.map((agent) => [agent.id, agent]));
+  const incoming = [...incomingById.values()];
+  if (!preserveDisplayAgents) return incoming;
+
+  const displayIds = new Set(displayAgents.map((agent) => agent.id));
+  return [
+    ...displayAgents.map((agent) => incomingById.get(agent.id) ?? agent),
+    ...incoming.filter((agent) => !displayIds.has(agent.id)),
+  ];
 }
 
 /** Insert or replace (by id) an agent; persists and returns the new list. */

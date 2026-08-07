@@ -1,4 +1,5 @@
-import { ChatPanel } from './ChatPanel';
+import { useState } from 'react';
+import { ChatPanel, type ChatActions } from './ChatPanel';
 import type { AgentSpec } from '../lib/agents';
 import type { ArioState } from '../types/ideario';
 
@@ -25,6 +26,9 @@ interface VoiceChatTabProps {
   onReflexResponse: (text: string) => void;
   /** Registration point: ChatPanel hands up its reflex-first send path. */
   onSendReady: (send: (text: string) => Promise<void>) => void;
+  onChatActionsReady: (actions: ChatActions) => void;
+  onSaveChat: () => boolean;
+  onClearChat: () => void;
 }
 
 const SILENT_MODE_COPY =
@@ -76,9 +80,30 @@ export function VoiceChatTab({
   ttsAvailable,
   onReflexResponse,
   onSendReady,
+  onChatActionsReady,
+  onSaveChat,
+  onClearChat,
 }: VoiceChatTabProps) {
   const displayText = interimTranscript || transcript;
   const listening = state === 'listening' || (wakeMode && !wakePaused);
+  const [clearArmed, setClearArmed] = useState(false);
+  const [chatActionStatus, setChatActionStatus] = useState<string | null>(null);
+
+  const handleSaveChat = () => {
+    setClearArmed(false);
+    setChatActionStatus(onSaveChat() ? 'Saved to History' : 'Nothing to save yet');
+  };
+
+  const handleClearChat = () => {
+    if (!clearArmed) {
+      setClearArmed(true);
+      setChatActionStatus('Tap Clear again to erase this active chat');
+      return;
+    }
+    onClearChat();
+    setClearArmed(false);
+    setChatActionStatus('Active chat cleared');
+  };
 
   return (
     <div className="h-full flex flex-col min-h-0">
@@ -145,6 +170,30 @@ export function VoiceChatTab({
           </p>
         )}
 
+        <div className="mt-2 flex items-center justify-center gap-2">
+          <button
+            type="button"
+            onClick={handleSaveChat}
+            className="min-h-10 px-3 rounded-xl border border-white/10 bg-ario-card text-ario-muted text-xs font-medium
+                       hover:border-ario-turquoise/50 hover:text-ario-text focus:outline-none focus:ring-2 focus:ring-ario-turquoise/50"
+          >
+            Save chat
+          </button>
+          <button
+            type="button"
+            onClick={handleClearChat}
+            className={`min-h-10 px-3 rounded-xl border text-xs font-medium focus:outline-none focus:ring-2 focus:ring-ario-red/50
+                       ${clearArmed
+                         ? 'bg-ario-red/15 border-ario-red/50 text-ario-red'
+                         : 'bg-ario-card border-white/10 text-ario-muted hover:border-ario-red/50 hover:text-ario-red'}`}
+          >
+            {clearArmed ? 'Tap again to clear' : 'Clear chat'}
+          </button>
+        </div>
+        {chatActionStatus && (
+          <p className="mt-1 text-ario-muted text-xs text-center" role="status">{chatActionStatus}</p>
+        )}
+
         {/* Silent-mode subtitle: honest fallback copy pointing at the Bridge
             tab's Crew audio (roadtest #3). */}
         {!ttsAvailable ? (
@@ -170,6 +219,7 @@ export function VoiceChatTab({
           visible={visible}
           onSendReady={onSendReady}
           onReflexResponse={onReflexResponse}
+          onActionsReady={onChatActionsReady}
         />
       </div>
     </div>

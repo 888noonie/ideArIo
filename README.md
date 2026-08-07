@@ -6,11 +6,11 @@ A voice-first, in-car AI companion PWA. React 19 + TypeScript + Vite + Tailwind,
 
 An always-on chat panel plus six tabs:
 
-- **Voice Chat** — hands-free conversation with wake word and spoken replies
+- **Voice Chat** — hands-free conversation with wake word and spoken replies; save snapshots or clear the active chat
 - **Ideas** — the live IdeaCanvas for the current ideario, plus saved ideas as collapsible notes with inline comments
-- **Agents** — create and edit the agent crew (names, colors, personas, wake words)
+- **Agents** — create and edit the agent crew (names, colors, personas, wake words); sync phone-created agents to the display
 - **Bridge** — pair two devices (phone + car head unit) over a Gist mailbox with WebRTC upgrade; syncs settings and queues links
-- **History** — browse past idearios
+- **History** — browse past idearios, saved chat snapshots, and continue or delete a saved chat
 - **Settings** — providers, models, GitHub Gist token, theme
 
 ## BYOK — bring your own keys
@@ -27,6 +27,12 @@ Six providers are supported:
 6. **Ollama** — choose Local mode for offline models (default `http://localhost:11434`) or Ollama Cloud mode with a BYOK key. Use Fetch models in the agent editor to list the selected endpoint's live catalogue.
 
 Optional: a GitHub token may be entered in Settings for Gist sync. The app stores it only in this browser and never bundles it. Bridge pairing now uses a server-side relay (`BRIDGE_GITHUB_TOKEN` in Vercel), so the car display does not need a Gist token to pair.
+
+## Chat and agent sync
+
+Use **Save chat** in Voice Chat to create a local snapshot. Saved chats appear in History, where they can be continued or deleted; **Clear chat** only clears the active conversation after a second tap.
+
+Use **Sync agents to display** from the phone's Agents tab after the pair reaches the SAS-verified WebRTC rung. The display always asks before applying the transfer. **Do not delete display agents** is on by default: same-ID agents update from the phone, new phone agents are added, and display-only agents remain. Turning it off makes the phone's list authoritative.
 
 ## Develop
 

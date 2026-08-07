@@ -387,7 +387,7 @@ export function SettingsPanel({
         <section className={sectionClass}>
           <h3 className={headingClass}>Sync settings to paired display</h3>
           <p className={hintClass}>
-            Pushes provider keys, Ollama URL, agents, theme and the capture model to the
+            Pushes provider keys, Ollama URL, theme and the capture model to the
             paired car display.
           </p>
           {!syncReady && (

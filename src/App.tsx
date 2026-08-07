@@ -20,11 +20,26 @@ import {
   saveSelectedModelId,
 } from './lib/model-id';
 import { loadTheme, saveTheme, applyTheme, type Theme } from './lib/theme';
-import { loadAgents, saveAgents, DEFAULT_AGENTS, type AgentSpec } from './lib/agents';
-import { CHAT_SYSTEM_ENTRY_EVENT } from './lib/chat-engine';
+import {
+  loadAgents,
+  saveAgents,
+  DEFAULT_AGENTS,
+  mergeSyncedAgents,
+  type AgentSpec,
+} from './lib/agents';
+import { CHAT_SYSTEM_ENTRY_EVENT, type ChatSnapshot } from './lib/chat-engine';
+import type { ChatActions } from './components/ChatPanel';
 import { getBridgeSession } from './lib/bridge/session';
-import { initSettingsSyncListener, takePendingSettings, type SyncedSettings } from './lib/settings-sync';
+import {
+  initAgentSyncListener,
+  initSettingsSyncListener,
+  takePendingAgentSync,
+  takePendingSettings,
+  type PendingAgentSync,
+  type SyncedSettings,
+} from './lib/settings-sync';
 import { SettingsSyncPrompt } from './components/SettingsSyncPrompt';
+import { AgentSyncPrompt } from './components/AgentSyncPrompt';
 import { isParked, persistParked } from './lib/drive-state';
 import type { ArioState, IdearioYAML, SavedIdeario } from './types/ideario';
 import type { ModelInfo } from './lib/model-registry';
@@ -88,13 +103,26 @@ export default function App() {
   const [bridgeRung, setBridgeRung] = useState(getBridgeSession().getStatus().rung);
   const [firstRunDone, setFirstRunDone] = useState(loadFirstRunDone);
   const [pendingSync, setPendingSync] = useState<SyncedSettings | null>(null);
+  const [pendingAgentSync, setPendingAgentSync] = useState<PendingAgentSync | null>(null);
 
   // The Voice Chat tab registers ChatPanel's send path here; finalized
   // voice transcripts flow through it (reflex lane FIRST, then dispatch)
   // exactly as if typed.
   const chatSendRef = useRef<((text: string) => Promise<void>) | null>(null);
+  const chatActionsRef = useRef<ChatActions | null>(null);
   const handleSendReady = useCallback((send: (text: string) => Promise<void>) => {
     chatSendRef.current = send;
+  }, []);
+  const handleChatActionsReady = useCallback((actions: ChatActions) => {
+    chatActionsRef.current = actions;
+  }, []);
+  const handleSaveChat = useCallback(() => chatActionsRef.current?.saveSnapshot() ?? false, []);
+  const handleClearChat = useCallback(() => {
+    chatActionsRef.current?.clear();
+  }, []);
+  const handleContinueChat = useCallback((snapshot: ChatSnapshot) => {
+    chatActionsRef.current?.restore(snapshot.entries);
+    setActiveTab('voice');
   }, []);
 
   // Persist paired mode (toggled from the Bridge tab).
@@ -208,10 +236,6 @@ export default function App() {
     } catch {
       // Ignore localStorage errors
     }
-    if (Array.isArray(s.agents) && s.agents.length > 0) {
-      saveAgents(s.agents);
-      setAgents(s.agents);
-    }
     if (s.theme === 'light' || s.theme === 'dark') {
       applyTheme(s.theme);
       saveTheme(s.theme);
@@ -233,6 +257,9 @@ export default function App() {
     initSettingsSyncListener((s: SyncedSettings) => {
       setPendingSync(s); // stage only — no writes until Accept
     });
+    initAgentSyncListener((sync: PendingAgentSync) => {
+      setPendingAgentSync(sync); // stage only — no writes until Accept
+    });
   }, []);
 
   const handleSyncAccept = useCallback(() => {
@@ -244,6 +271,24 @@ export default function App() {
   const handleSyncDecline = useCallback(() => {
     takePendingSettings(); // discard
     setPendingSync(null);
+  }, []);
+
+  const handleAgentSyncAccept = useCallback(() => {
+    const sync = takePendingAgentSync();
+    if (sync) {
+      const merged = mergeSyncedAgents(agents, sync.agents, sync.preserveDisplayAgents);
+      saveAgents(merged);
+      setAgents(merged);
+      window.dispatchEvent(
+        new CustomEvent(CHAT_SYSTEM_ENTRY_EVENT, { detail: 'Agents synced from phone' })
+      );
+    }
+    setPendingAgentSync(null);
+  }, [agents]);
+
+  const handleAgentSyncDecline = useCallback(() => {
+    takePendingAgentSync();
+    setPendingAgentSync(null);
   }, []);
 
   // Online/offline detection
@@ -506,6 +551,9 @@ export default function App() {
               ttsAvailable={ttsAvailable}
               onReflexResponse={handleReflexResponse}
               onSendReady={handleSendReady}
+              onChatActionsReady={handleChatActionsReady}
+              onSaveChat={handleSaveChat}
+              onClearChat={handleClearChat}
             />
           </div>
 
@@ -527,7 +575,7 @@ export default function App() {
           )}
 
           {activeTab === 'history' && (
-            <HistoryTab savedIdeas={savedIdeas} />
+            <HistoryTab savedIdeas={savedIdeas} onContinueChat={handleContinueChat} />
           )}
 
           {activeTab === 'settings' && (
@@ -559,6 +607,14 @@ export default function App() {
           settings={pendingSync}
           onAccept={handleSyncAccept}
           onDecline={handleSyncDecline}
+        />
+      )}
+
+      {!pendingSync && pendingAgentSync && (
+        <AgentSyncPrompt
+          sync={pendingAgentSync}
+          onAccept={handleAgentSyncAccept}
+          onDecline={handleAgentSyncDecline}
         />
       )}
     </div>

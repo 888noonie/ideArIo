@@ -1,9 +1,16 @@
 import { useMemo, useState } from 'react';
-import { loadChatLog, type ChatEntry } from '../lib/chat-engine';
+import {
+  deleteChatSnapshot,
+  loadChatLog,
+  loadChatSnapshots,
+  type ChatEntry,
+  type ChatSnapshot,
+} from '../lib/chat-engine';
 import type { SavedIdeario } from '../types/ideario';
 
 interface HistoryTabProps {
   savedIdeas: SavedIdeario[];
+  onContinueChat: (snapshot: ChatSnapshot) => void;
 }
 
 type DisplayMode = 'compact' | 'comfortable';
@@ -62,11 +69,13 @@ function entrySpeaker(entry: ChatEntry): string {
  * persists in `ideario-display-mode` (F3); expand animation respects
  * prefers-reduced-motion via the `.history-expand` rule in index.css.
  */
-export function HistoryTab({ savedIdeas }: HistoryTabProps) {
+export function HistoryTab({ savedIdeas, onContinueChat }: HistoryTabProps) {
   const [mode, setMode] = useState<DisplayMode>(loadDisplayMode);
   // Loaded on mount — the tab is remounted each time it is opened, so this
   // is always the current log.
   const [entries] = useState<ChatEntry[]>(loadChatLog);
+  const [snapshots, setSnapshots] = useState<ChatSnapshot[]>(loadChatSnapshots);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
   const days = useMemo(() => {
     const byDay = new Map<string, ChatEntry[]>();
@@ -107,6 +116,12 @@ export function HistoryTab({ savedIdeas }: HistoryTabProps) {
     saveDisplayMode(next);
   };
 
+  const handleDeleteSnapshot = (id: string) => {
+    deleteChatSnapshot(id);
+    setSnapshots((current) => current.filter((snapshot) => snapshot.id !== id));
+    setConfirmDeleteId(null);
+  };
+
   const compact = mode === 'compact';
   const rowPad = compact ? 'py-1' : 'py-2.5';
   const rowText = compact ? 'text-xs' : 'text-sm';
@@ -141,7 +156,59 @@ export function HistoryTab({ savedIdeas }: HistoryTabProps) {
       </div>
 
       <div className="flex-1 min-h-0 overflow-y-auto chat-scroll flex flex-col gap-2 pr-1">
-        {/* Chat log grouped by day */}
+        <div className="flex-none rounded-2xl bg-ario-card border border-white/10 overflow-hidden">
+          <div className="min-h-14 px-4 flex items-center justify-between gap-3">
+            <span className={`${headText} text-ario-text font-medium`}>Saved chats</span>
+            <span className="text-ario-muted text-xs">
+              {snapshots.length} {snapshots.length === 1 ? 'chat' : 'chats'}
+            </span>
+          </div>
+          <div className="border-t border-white/5 px-4 pb-2">
+            {snapshots.length === 0 ? (
+              <p className="text-ario-muted text-sm py-3">Save a chat from Voice to keep it here.</p>
+            ) : (
+              snapshots.map((snapshot) => (
+                <div key={snapshot.id} className={`${rowPad} border-b border-white/5 last:border-b-0`}>
+                  <p className={`${rowText} text-ario-text truncate`}>{snapshot.title}</p>
+                  <p className="text-ario-muted text-xs mt-0.5">
+                    {new Date(snapshot.createdAt).toLocaleString()} · {snapshot.entries.length} entries
+                  </p>
+                  <div className="mt-2 flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => onContinueChat(snapshot)}
+                      className="min-h-10 px-3 rounded-xl border border-ario-turquoise/40 bg-ario-turquoise/10 text-ario-turquoise text-xs font-medium
+                                 focus:outline-none focus:ring-2 focus:ring-ario-turquoise/50"
+                    >
+                      Continue
+                    </button>
+                    {confirmDeleteId === snapshot.id ? (
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteSnapshot(snapshot.id)}
+                        className="min-h-10 px-3 rounded-xl border border-ario-red/50 bg-ario-red/15 text-ario-red text-xs font-medium
+                                   focus:outline-none focus:ring-2 focus:ring-ario-red/50"
+                      >
+                        Delete now
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setConfirmDeleteId(snapshot.id)}
+                        className="min-h-10 px-3 rounded-xl border border-white/10 bg-ario-card text-ario-muted text-xs font-medium
+                                   hover:border-ario-red/50 hover:text-ario-red focus:outline-none focus:ring-2 focus:ring-ario-red/50"
+                      >
+                        Delete
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+
+        {/* Current active chat log, grouped by day. */}
         {days.length === 0 ? (
           <p className="text-ario-muted text-sm text-center py-6">
             No chat history yet — talk to your crew in the Voice Chat tab.
