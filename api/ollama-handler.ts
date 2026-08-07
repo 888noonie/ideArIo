@@ -25,7 +25,9 @@ export interface OllamaProxyResult {
 }
 
 const OLLAMA_CLOUD_BASE = 'https://ollama.com/api';
-const TIMEOUT_MS = 30_000;
+// Vercel caps api/ollama-proxy.ts at 10s. Abort early enough to return
+// Ario's own timeout body instead of a raw platform 504.
+const TIMEOUT_MS = 8_000;
 
 function fetchWithTimeout(url: string, options: RequestInit, timeoutMs: number): Promise<Response> {
   const controller = new AbortController();
@@ -58,7 +60,7 @@ export async function handleOllamaProxyRequest(body: OllamaProxyBody | undefined
   } catch (error) {
     const timedOut = error instanceof Error && error.name === 'AbortError';
     return {
-      status: 502,
+      status: timedOut ? 504 : 502,
       body: { error: timedOut ? 'Ollama Cloud request timed out.' : 'Could not reach Ollama Cloud.' },
     };
   }

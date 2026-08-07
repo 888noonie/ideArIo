@@ -40,11 +40,32 @@ function isValidEnvelope(env: unknown): env is BridgeEnvelope {
 const MAILBOX_TTL_MS = 24 * 60 * 60 * 1000;
 const MAX_ENVELOPES = 100;
 const MAX_BODY_BYTES = 64 * 1024;
+const GIST_WRITE_ATTEMPTS = 3;
+const GIST_RETRY_DELAYS_MS = [0, 150, 450];
 
 interface RoomFile {
   hub_secret_hash: string;
   display_secret_hash?: string;
   expires_at: number;
+}
+
+class GitHubRequestError extends Error {
+  constructor(
+    readonly operation: string,
+    readonly status: number,
+    readonly transient: boolean
+  ) {
+    super(`${operation} failed: HTTP ${status}`);
+  }
+}
+
+function githubRequestError(operation: string, response: Response): GitHubRequestError {
+  const rateLimited = response.status === 403 && response.headers.get('x-ratelimit-remaining') === '0';
+  return new GitHubRequestError(
+    operation,
+    response.status,
+    rateLimited || response.status === 409 || response.status === 429 || response.status >= 500
+  );
 }
 
 function getToken(): string {
@@ -145,6 +166,18 @@ function sendJson(res: VercelResponse, status: number, body: unknown): void {
   res.status(status).json(body);
 }
 
+function isTransientGitHubError(error: unknown): boolean {
+  if (error instanceof GitHubRequestError) {
+    return error.transient;
+  }
+  return error instanceof TypeError;
+}
+
+function retryDelay(attempt: number): Promise<void> {
+  const delay = GIST_RETRY_DELAYS_MS[attempt] ?? GIST_RETRY_DELAYS_MS.at(-1) ?? 0;
+  return delay === 0 ? Promise.resolve() : new Promise((resolve) => setTimeout(resolve, delay));
+}
+
 async function findMailboxGist(token: string, code: string): Promise<{ id: string } | null> {
   const response = await fetch(`${GITHUB_API}/gists?per_page=100`, {
     headers: headers(token),
@@ -174,7 +207,7 @@ async function createMailboxGist(
     }),
   });
   if (!response.ok) {
-    throw new Error(`Gist create failed: HTTP ${response.status}`);
+    throw githubRequestError('Gist create', response);
   }
   return (await response.json()) as { id: string };
 }
@@ -189,7 +222,7 @@ async function readGist(token: string, gistId: string): Promise<GistFiles> {
     headers: headers(token),
   });
   if (!response.ok) {
-    throw new Error(`Gist read failed: HTTP ${response.status}`);
+    throw githubRequestError('Gist read', response);
   }
   const gist = (await response.json()) as { files: GistFiles };
   return gist.files;
@@ -242,7 +275,7 @@ async function writeRoomFile(token: string, gistId: string, room: RoomFile): Pro
     body: JSON.stringify({ files: { [ROOM_FILE_NAME]: { content: JSON.stringify(room) } } }),
   });
   if (!response.ok) {
-    throw new Error(`Room metadata write failed: HTTP ${response.status}`);
+    throw githubRequestError('Room metadata write', response);
   }
 }
 
@@ -266,8 +299,50 @@ async function writeGistFile(
     }),
   });
   if (!response.ok) {
-    throw new Error(`Gist write failed: HTTP ${response.status}`);
+    throw githubRequestError('Gist write', response);
   }
+}
+
+async function mergeAndWriteMailbox(
+  token: string,
+  gistId: string,
+  initial: { envelopes: BridgeEnvelope[]; expires_at?: number },
+  initialRoom: RoomFile,
+  incoming: BridgeEnvelope[],
+  requestedExpiresAt?: number
+): Promise<void> {
+  let current = initial;
+  let roomMetadata = initialRoom;
+  let lastError: unknown;
+
+  for (let attempt = 0; attempt < GIST_WRITE_ATTEMPTS; attempt += 1) {
+    try {
+      await retryDelay(attempt);
+      if (attempt > 0) {
+        const files = await readGist(token, gistId);
+        const refreshedRoom = readRoomFile(files);
+        if (!refreshedRoom) throw new Error('Pairing room is invalid.');
+        roomMetadata = refreshedRoom;
+        current = await readGistFile(files);
+      }
+
+      const merged = new Map<string, BridgeEnvelope>();
+      for (const envelope of current.envelopes) merged.set(envelope.id, envelope);
+      for (const envelope of incoming) merged.set(envelope.id, envelope);
+      const expiresAt = requestedExpiresAt ?? current.expires_at;
+
+      await writeGistFile(token, gistId, [...merged.values()], expiresAt);
+      if (expiresAt && expiresAt !== roomMetadata.expires_at) {
+        roomMetadata.expires_at = expiresAt;
+        await writeRoomFile(token, gistId, roomMetadata);
+      }
+      return;
+    } catch (error) {
+      lastError = error;
+      if (!isTransientGitHubError(error) || attempt === GIST_WRITE_ATTEMPTS - 1) break;
+    }
+  }
+  throw lastError;
 }
 
 async function handleCreate(req: VercelRequest, res: VercelResponse): Promise<void> {
@@ -387,7 +462,7 @@ async function handleRoom(req: VercelRequest, res: VercelResponse): Promise<void
 
   const body = req.body as Record<string, unknown> | undefined;
   let incoming: BridgeEnvelope[];
-  let expiresAt = current.expires_at;
+  let requestedExpiresAt: number | undefined;
   if (isValidEnvelope(body?.envelope)) {
     // Normal sends append a single envelope server-side. This avoids a
     // client-side read-modify-write race between the phone and display.
@@ -405,23 +480,27 @@ async function handleRoom(req: VercelRequest, res: VercelResponse): Promise<void
         return;
       }
       incoming = parsed.envelopes.filter(isValidEnvelope);
-      expiresAt = parsed.expires_at ?? current.expires_at;
+      requestedExpiresAt = parsed.expires_at;
     } catch {
       sendJson(res, 400, { error: 'Invalid messages.json content.' });
       return;
     }
   }
 
-  const merged = new Map<string, BridgeEnvelope>();
-  for (const envelope of current.envelopes) merged.set(envelope.id, envelope);
-  for (const envelope of incoming) merged.set(envelope.id, envelope);
   try {
-    await writeGistFile(token, gist.id, [...merged.values()], expiresAt);
-    if (expiresAt && expiresAt !== roomMetadata.expires_at) {
-      roomMetadata.expires_at = expiresAt;
-      await writeRoomFile(token, gist.id, roomMetadata);
+    await mergeAndWriteMailbox(
+      token,
+      gist.id,
+      current,
+      roomMetadata,
+      incoming,
+      requestedExpiresAt
+    );
+  } catch (error) {
+    if (isTransientGitHubError(error)) {
+      sendJson(res, 503, { error: 'Pairing mailbox is temporarily unavailable. Please retry.' });
+      return;
     }
-  } catch {
     sendJson(res, 500, { error: 'Could not write pairing mailbox.' });
     return;
   }

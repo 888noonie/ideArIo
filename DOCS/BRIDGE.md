@@ -55,7 +55,10 @@ stop() ── closes DC + PC, clears all timers, resets to offline
 Inbound envelopes are deduped by id across both transports. Outbound
 envelope are buffered (max 20) while disconnected and flushed on
 connect. `lastPeerSeen` updates on ANY inbound envelope or DataChannel
-message.
+message. Relay mailbox writes retry a bounded read-merge-write cycle for
+transient GitHub conflicts, rate limits, or upstream 5xx failures; a persistent
+upstream problem returns an honest temporary-unavailable response instead of a
+generic relay error.
 
 ## Settings and agent sync
 
